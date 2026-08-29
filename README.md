@@ -4,6 +4,10 @@ Echo is a persistent, tool-using choir operations agent. It combines structured
 LLM planning with deterministic permissions, dates, workflows, scheduling and
 database-backed state.
 
+Echo was built for my local choir and reflects how that choir works. You can
+study the code and adapt its prompts, tools, workflows and integrations for
+your own choir, group or community.
+
 Echo currently ships with a WhatsApp transport powered by Baileys and a local
 browser staging group that runs the same application without starting WhatsApp.
 
@@ -88,6 +92,10 @@ Open [http://127.0.0.1:3100](http://127.0.0.1:3100). Select a member under
 **Speaking as**, send messages, reply to Echo, inspect agent activity and use
 the Operations view to test schedules and application time travel.
 
+The **Agent activity** view shows the agent's flow step by step, including its
+planning decisions, activated capabilities, selected tools, tool results and
+final response. This makes it easier to understand and debug agent behavior.
+
 The browser staging command does not start Baileys.
 
 ## What Echo Can Do
@@ -137,6 +145,28 @@ profiles without replacing the core executor.
 
 Read the full [architecture documentation](documentation/echo-3-architecture.md)
 and [framework extension guide](documentation/extending-echo.md).
+
+## How To Read The Codebase
+
+Follow this order if you are new to the project:
+
+1. Start with `src/index.ts`, `src/app/container.ts` and
+   `src/app/createEchoApplication.ts` to see how the application starts and how
+   its main services are connected.
+2. Read `src/app/messageRouter.ts` and the files under
+   `src/integrations/whatsapp` or `src/integrations/localChat` to follow a
+   message from the transport into Echo.
+3. Read `src/agent/services/echoAgentService.ts`, then the files under
+   `src/agent/runtime` to understand context loading, planning, tool selection
+   and bounded execution.
+4. Read `src/agent/tools/coreTools.ts` to see what the agent can do and which
+   permissions apply to each action.
+5. Read `src/domains/choir` and `src/workflows` for choir decisions, scheduled
+   operations, reminders and setlists. External systems live under
+   `src/integrations`.
+6. Use `config/agent.yaml`, `config/models.yaml`, `src/prompts` and `src/tests`
+   to understand runtime limits, model roles, agent instructions and expected
+   behavior.
 
 ## Configuration
 
