@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Echo Staging Group</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">E</div>
+          <div>
+            <strong>Echo</strong>
+            <span>Staging group</span>
+          </div>
+        </div>
+
+        <nav class="view-tabs" aria-label="Workspace views">
+          <button class="tab active" data-view="chat" type="button">Chat</button>
+          <button class="tab" data-view="activity" type="button">Agent activity</button>
+          <button class="tab" data-view="operations" type="button">Operations</button>
+        </nav>
+
+        <section class="actor-panel">
+          <label for="actor-select">Speaking as</label>
+          <div class="actor-row">
+            <select id="actor-select" data-testid="actor-select"></select>
+            <button id="new-actor" class="icon-button" type="button" title="Add simulated participant" aria-label="Add simulated participant">+</button>
+            <button id="refresh-actors" class="icon-button" type="button" title="Refresh members" aria-label="Refresh members">R</button>
+          </div>
+          <form id="new-actor-form" class="new-actor-form" hidden>
+            <label class="sr-only" for="new-actor-name">WhatsApp display name</label>
+            <input id="new-actor-name" maxlength="100" placeholder="WhatsApp display name" />
+            <button type="submit">Add</button>
+            <button id="cancel-new-actor" type="button">Cancel</button>
+          </form>
+          <p id="actor-role" class="muted"></p>
+        </section>
+
+        <div class="runtime-status">
+          <span class="status-dot"></span>
+          <div>
+            <strong>Local transport</strong>
+            <span id="clock-label">Connecting...</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section id="chat-view" class="view active" aria-label="Staging chat">
+          <header class="topbar">
+            <div>
+              <h1>Choir operations</h1>
+              <p>The production agent pipeline, without WhatsApp.</p>
+            </div>
+            <span id="environment-badge" class="badge">STAGING</span>
+          </header>
+
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <form id="composer" class="composer">
+            <div id="reply-preview" class="reply-preview" hidden>
+              <div>
+                <strong id="reply-author"></strong>
+                <span id="reply-text"></span>
+              </div>
+              <button id="clear-reply" class="icon-button" type="button" title="Cancel reply" aria-label="Cancel reply">X</button>
+            </div>
+            <label class="sr-only" for="message-input">Message Echo</label>
+            <textarea id="message-input" data-testid="message-input" rows="2" maxlength="4000" placeholder="Message Echo as the selected member"></textarea>
+            <div class="composer-footer">
+              <span id="send-status" class="muted">Enter to send, Shift+Enter for a new line</span>
+              <button id="send-button" data-testid="send-button" class="send-button" type="submit">Send</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="activity-view" class="view" aria-label="Agent activity">
+          <header class="topbar">
+            <div>
+              <h1>Agent activity</h1>
+              <p>Live plans, selected tools, and execution results.</p>
+            </div>
+            <span class="live-label"><span class="status-dot"></span>Live</span>
+          </header>
+          <div class="activity-layout">
+            <div class="activity-note">
+              This view shows operational decisions only. Private reasoning, prompts, memory contents, and identifiers remain hidden.
+            </div>
+            <div id="activity" class="activity-list" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <section id="operations-view" class="view" aria-label="Operations">
+          <header class="topbar">
+            <div>
+              <h1>Runtime operations</h1>
+              <p>Live scheduler and obligation visibility.</p>
+            </div>
+            <button id="refresh-operations" class="secondary-button" type="button">Refresh</button>
+          </header>
+          <section class="clock-panel" aria-labelledby="clock-heading">
+            <div class="clock-summary">
+              <div>
+                <h2 id="clock-heading">Application time</h2>
+                <p id="operations-clock">Loading...</p>
+              </div>
+              <span id="clock-mode" class="badge">Live</span>
+            </div>
+            <div class="clock-controls">
+              <form id="set-clock-form" class="set-clock-form">
+                <label class="sr-only" for="mock-date-time">Mock date and time</label>
+                <input id="mock-date-time" type="datetime-local" required />
+                <button class="secondary-button clock-action" type="submit">Set time</button>
+              </form>
+              <div class="advance-controls" aria-label="Advance application time">
+                <button class="secondary-button clock-action" type="button" data-hours="1">+1 hour</button>
+                <button class="secondary-button clock-action" type="button" data-days="1">+1 day</button>
+                <button class="secondary-button clock-action" type="button" data-days="7">+1 week</button>
+                <button id="clear-mock-time" class="secondary-button clock-action" type="button">Live time</button>
+              </div>
+            </div>
+            <p id="clock-status" class="muted" aria-live="polite"></p>
+          </section>
+          <div class="operations-grid">
+            <section class="data-section">
+              <div class="section-heading">
+                <h2>Scheduled jobs</h2>
+                <span id="schedule-count" class="count">0</span>
+              </div>
+              <div id="schedules" class="data-list"></div>
+            </section>
+            <section class="data-section">
+              <div class="section-heading">
+                <h2>Active obligations</h2>
+                <span id="obligation-count" class="count">0</span>
+              </div>
+              <div id="obligations" class="data-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

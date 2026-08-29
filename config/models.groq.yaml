@@ -1,0 +1,74 @@
+# Previous Groq/Cohere chat configuration, retained as an optional rollback reference.
+# API-key values remain in environment files; this file
+# references only their variable names and is safe to commit.
+version: 1
+
+# Retryable endpoint failures use the initial delay, then double after every
+# consecutive failure. A successful call resets the endpoint, and no cooldown
+# can exceed 24 hours.
+failover:
+  initialCooldownMs: 60000
+  maximumCooldownMs: 86400000 # 24 hours
+
+# A provider is one model account/endpoint. `id` is referenced by roles,
+# `type` selects its LangChain adapter, and `apiKeyEnv` names its secret in .env.
+# `baseUrl` may be added for OpenAI-compatible services such as OpenRouter.
+providers:
+  - id: groq-primary
+    type: groq
+    apiKeyEnv: GROQ_API_KEY
+
+  # This endpoint joins Groq role chains automatically when the key is configured.
+  - id: groq-secondary
+    type: groq
+    apiKeyEnv: GROQ_API_KEY_BACKUP
+    optional: true
+
+  - id: cohere
+    type: cohere
+    apiKeyEnv: COHERE_API_KEY
+
+embeddings:
+  # Provider reference, embedding model, Pinecone vector size and API batch size.
+  # Changing provider or model requires rebuilding and repopulating the index.
+  provider: cohere
+  model: embed-english-v3.0
+  dimension: 1024
+  batchSize: 48
+
+roles:
+  # Endpoints are attempted from top to bottom. `provider` references an ID
+  # above; `model` is that provider's model identifier; `temperature` controls
+  # response variation; optional `topP` controls probability sampling; and
+  # optional `maxTokens` limits one generated response. When omitted, Echo does
+  # not impose a cap and the selected provider/model applies its normal limit.
+  # Optional endpoint settings can be enabled when needed:
+  #   topP: 0.9
+  #   maxTokens: 2048
+  # Operational reasoning, tool selection and multi-step planning.
+  planner:
+    - provider: groq-primary
+      model: openai/gpt-oss-120b
+      temperature: 0
+    - provider: groq-secondary
+      model: openai/gpt-oss-120b
+      temperature: 0
+
+  # Routine conversation and inexpensive response synthesis.
+  fast:
+    - provider: groq-primary
+      model: llama-3.3-70b-versatile
+      temperature: 0.4
+    - provider: groq-secondary
+      model: llama-3.3-70b-versatile
+      temperature: 0.4
+
+  # Narrow semantic normalization for date phrases that the deterministic
+  # parser cannot understand directly. This model never produces timestamps.
+  extraction:
+    - provider: groq-primary
+      model: llama-3.3-70b-versatile
+      temperature: 0
+    - provider: groq-secondary
+      model: llama-3.3-70b-versatile
+      temperature: 0

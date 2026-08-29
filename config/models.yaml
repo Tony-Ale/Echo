@@ -1,0 +1,48 @@
+# Active OpenRouter chat configuration. API-key values remain in environment
+# files; this file references only their variable names and is safe to commit.
+version: 1
+
+# Endpoint failures enter a bounded cooldown. Every role intentionally has one
+# endpoint, so Echo does not switch to another model after a failure.
+failover:
+  initialCooldownMs: 60000
+  maximumCooldownMs: 86400000 # 24 hours
+
+providers:
+  # OpenRouter is a first-class provider. Its LangChain transport and standard
+  # API endpoint are owned internally by the OpenRouter adapter.
+  - id: openrouter
+    type: openrouter
+    apiKeyEnv: OPENROUTER_API_KEY
+
+  # Cohere remains dedicated to embeddings so the existing 1024-dimension
+  # Pinecone index does not need to be rebuilt.
+  - id: cohere
+    type: cohere
+    apiKeyEnv: COHERE_API_KEY
+
+embeddings:
+  provider: cohere
+  model: embed-english-v3.0
+  dimension: 1024
+  batchSize: 48
+
+roles:
+  # Operational reasoning, tool selection and multi-step planning.
+  planner:
+    - provider: openrouter
+      model: google/gemini-3-flash-preview
+      temperature: 0
+
+  # Routine conversation and inexpensive response synthesis.
+  fast:
+    - provider: openrouter
+      model: google/gemini-2.5-flash
+      temperature: 0.4
+
+  # Narrow semantic normalization for date phrases that the deterministic
+  # parser cannot understand directly. This model never produces timestamps.
+  extraction:
+    - provider: openrouter
+      model: google/gemini-2.5-flash-lite
+      temperature: 0

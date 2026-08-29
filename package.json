@@ -1,0 +1,70 @@
+{
+  "name": "assistant",
+  "version": "1.0.0",
+  "description": "Persistent, tool-using choir operations agent with pluggable transports and integrations",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "npx tsx src/index.ts",
+    "staging": "tsx src/staging.ts",
+    "staging:whatsapp": "tsx src/whatsappStaging.ts",
+    "seed:identities": "tsx src/scripts/seedProductionIdentities.ts",
+    "seed:identities:staging": "tsx src/scripts/seedProductionIdentities.ts --env-file .env.staging --seed-file seeds/identities.staging.json",
+    "sync": "npx tsx src/sync.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run test:workflow && npm run test:setlist && npm run test:scheduled-task && npm run test:framework && npm run test:model && npm run test:agent && npm run test:retrieval && npm run test:staging",
+    "test:workflow": "tsx src/tests/workflowSelfTest.ts",
+    "test:setlist": "tsx src/tests/setlistSelfTest.ts",
+    "test:scheduled-task": "tsx src/tests/scheduledTaskSelfTest.ts",
+    "test:framework": "tsx src/tests/frameworkSelfTest.ts",
+    "test:model": "tsx src/tests/modelInfrastructureSelfTest.ts",
+    "test:agent": "tsx src/tests/agentSelfTest.ts",
+    "test:retrieval": "tsx src/tests/retrievalSelfTest.ts",
+    "test:staging": "tsx src/tests/stagingSelfTest.ts"
+  },
+  "keywords": [
+    "whatsapp",
+    "rag",
+    "agent",
+    "pinecone",
+    "baileys",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@langchain/cohere": "^1.0.2",
+    "@langchain/core": "^1.1.24",
+    "@langchain/groq": "^1.1.0",
+    "@langchain/openai": "^1.2.7",
+    "@langchain/pinecone": "^1.0.1",
+    "@langchain/textsplitters": "^1.0.1",
+    "@pinecone-database/pinecone": "^5.1.2",
+    "@supabase/supabase-js": "^2.97.0",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "chrono-node": "^2.9.0",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "googleapis": "^144.0.0",
+    "luxon": "^3.7.2",
+    "node-cron": "^4.2.1",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
+    "qrcode": "^1.5.4",
+    "yaml": "^2.9.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^22.7.4",
+    "@types/qrcode": "^1.5.6",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}

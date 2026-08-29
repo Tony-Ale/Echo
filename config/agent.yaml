@@ -1,0 +1,58 @@
+# Central runtime tuning for Echo's agent loop and bounded context.
+# Secrets, model assignments, prompts and choir rules do not belong here.
+version: 1
+
+execution:
+  maxSteps: 10
+  maxFailures: 2
+  turnTimeoutMs: 300000 # 5 minutes
+
+budgeting:
+  # Context limits below are approximate tokens. Echo converts them to
+  # deterministic character limits internally using this provider-neutral ratio.
+  approximateCharactersPerToken: 4
+
+context:
+  plannerInputTokens: 6000
+  memoryBlockTokens: 2000
+
+  recentConversation:
+    messageLimit: 5
+    tokensPerMessage: 200
+
+  historySearch:
+    defaultLimit: 5
+    maximumLimit: 10
+    tokensPerMessage: 200
+
+  memoryDirectory:
+    maximumEntries: 20
+    compactedEntries: 10
+    descriptionTokens: 60
+
+  memberMemory:
+    maximumFacts: 20
+    defaultSearchLimit: 5
+    maximumSearchLimit: 10
+
+planning:
+  responseMessageTokens: 1000
+  toolInputTokens: 2000
+  reasonTokens: 125
+  maximumPlanItems: 6
+  planItemTokens: 75
+  maximumParallelContextRequests: 3
+
+reusableProcedures:
+  maximumSteps: 12
+  inputTokensPerStep: 1000
+
+toolResults:
+  retainedTokens: 2000
+  compactedTokens: 1000
+
+retrieval:
+  structuredEvidenceTokens: 1750
+  semanticEvidenceTokens: 750
+  fieldTokens: 375
+  weeklyEvidenceTokens: 2000

@@ -1,0 +1,17 @@
+export const AGENT_TABLES = {
+  members: "echo_members",
+  memberIdentifiers: "echo_member_identifiers",
+  memberRoles: "echo_member_roles",
+  memoryBlocks: "echo_memory_blocks",
+  memberFacts: "echo_member_memory_facts",
+  obligations: "echo_agent_obligations",
+  scheduledAgentTasks: "echo_scheduled_agent_tasks",
+  weeklyInterpretations: "echo_weekly_interpretations",
+  syncState: "echo_sync_state",
+  events: "echo_agent_events",
+  turns: "echo_agent_turns",
+  toolExecutions: "echo_tool_executions",
+  approvals: "echo_agent_approvals",
+  conversationMessages: "echo_conversation_messages",
+  auditLog: "echo_audit_log",
+} as const;

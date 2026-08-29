@@ -1,0 +1,31 @@
+{
+  "members": [
+    {
+      "canonicalName": "Choir Creator",
+      "displayName": "Creator",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "COUNTRY_CODE_AND_NUMBER", "verified": true },
+        { "kind": "alias", "value": "Creator", "verified": true }
+      ],
+      "roles": ["member", "superuser", "creator"],
+      "profile": {
+        "preferredDisplayName": "Creator",
+        "aliases": []
+      }
+    },
+    {
+      "canonicalName": "Choir Member",
+      "displayName": "Member",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "COUNTRY_CODE_AND_NUMBER", "verified": true }
+      ],
+      "roles": ["member"],
+      "profile": {
+        "preferredDisplayName": "Member",
+        "aliases": []
+      }
+    }
+  ]
+}

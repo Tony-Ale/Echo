@@ -1,0 +1,72 @@
+{
+  "members": [
+    {
+      "canonicalName": "Avery Stone",
+      "displayName": "Avery",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "999000000001", "verified": true },
+        { "kind": "alias", "value": "Choir Coordinator", "verified": true }
+      ],
+      "roles": ["member", "superuser", "creator"],
+      "profile": {
+        "preferredDisplayName": "Avery",
+        "aliases": ["Ave", "Coordinator"]
+      }
+    },
+    {
+      "canonicalName": "Jordan Vale",
+      "displayName": "Jordy",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "999000000002", "verified": true },
+        { "kind": "alias", "value": "Music Admin", "verified": true }
+      ],
+      "roles": ["member", "superuser"],
+      "profile": {
+        "preferredDisplayName": "Jordy",
+        "aliases": ["Jordan", "Music Admin"]
+      }
+    },
+    {
+      "canonicalName": "Maya Reed",
+      "displayName": "Maya R",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "999000000003", "verified": true },
+        { "kind": "alias", "value": "Maya", "verified": true }
+      ],
+      "roles": ["member"],
+      "profile": {
+        "preferredDisplayName": "Maya",
+        "aliases": ["Maya R", "Song Lead"]
+      }
+    },
+    {
+      "canonicalName": "Taylor Brooks",
+      "displayName": "T Brooks",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "999000000004", "verified": true }
+      ],
+      "roles": ["member"],
+      "profile": {
+        "preferredDisplayName": "Taylor",
+        "aliases": ["T Brooks"]
+      }
+    },
+    {
+      "canonicalName": "Morgan Lane",
+      "displayName": "Morgan",
+      "status": "active",
+      "identifiers": [
+        { "kind": "phone", "value": "999000000005", "verified": true }
+      ],
+      "roles": ["member"],
+      "profile": {
+        "preferredDisplayName": "Morgan",
+        "aliases": ["Mo"]
+      }
+    }
+  ]
+}

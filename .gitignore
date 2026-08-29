@@ -1,0 +1,44 @@
+# Environment files and deployment secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.private.json
+*service-account*.json
+*-credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime identity and transport state
+.wabot-auth/
+src/externalDocuments/*.txt
+!src/externalDocuments/README.md
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Logs and local runtime artifacts
+*.log
+logs/
+.cache/
+.tmp/
+tmp/
+
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/
+
+# Local reference repositories
+letta-code/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
