@@ -444,7 +444,7 @@ export class InMemorySchedulerPort implements SchedulerPort {
 }
 
 export class InMemoryConversationRepository implements ConversationRepository {
-  public readonly entries = new Map<string, ConversationEntry[]>();
+  public readonly entries = new Map<string, Array<ConversationEntry & { externalMessageId?: string }>>();
   private readonly externalIds = new Set<string>();
 
   public async append(input: {
@@ -458,7 +458,13 @@ export class InMemoryConversationRepository implements ConversationRepository {
     if (externalKey && this.externalIds.has(externalKey)) return;
     if (externalKey) this.externalIds.add(externalKey);
     const entries = this.entries.get(input.chatId) ?? [];
-    entries.push({ role: input.role, content: input.content, senderName: input.senderName, createdAt: clockService.now().toISO()! });
+    entries.push({
+      role: input.role,
+      content: input.content,
+      senderName: input.senderName,
+      createdAt: clockService.now().toISO()!,
+      externalMessageId: input.externalMessageId,
+    });
     this.entries.set(input.chatId, entries);
   }
 
@@ -466,9 +472,10 @@ export class InMemoryConversationRepository implements ConversationRepository {
     return (this.entries.get(chatId) ?? []).slice(-limit);
   }
 
-  public async search(chatId: string, query: string, limit: number): Promise<ConversationEntry[]> {
+  public async search(chatId: string, query: string, limit: number, excludeExternalMessageId?: string): Promise<ConversationEntry[]> {
     const terms = query.toLowerCase().match(/[a-z0-9']{2,}/g) ?? [];
     return (this.entries.get(chatId) ?? [])
+      .filter((entry) => entry.externalMessageId !== excludeExternalMessageId)
       .filter((entry) => terms.some((term) => `${entry.senderName ?? ""} ${entry.content}`.toLowerCase().includes(term)))
       .slice(-limit);
   }

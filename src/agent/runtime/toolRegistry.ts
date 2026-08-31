@@ -93,6 +93,7 @@ export class AgentToolRegistry {
     const syncAvailable = shouldExposeSync(previousSteps);
     return this.catalog().filter((tool) =>
       active.has(tool.capability)
+      && isAllowedForEvent(event, tool.name)
       && isToolDiscoverable(this.tools.get(tool.name)!, event, context, previousSteps)
       && !CONTEXT_SOURCE_TOOLS.has(tool.name)
       && (tool.name !== "sync_if_stale" || syncAvailable)
@@ -108,6 +109,7 @@ export class AgentToolRegistry {
       toolNames: this.catalog()
         .filter((tool) =>
           tool.capability === id
+          && isAllowedForEvent(event, tool.name)
           && !CONTEXT_SOURCE_TOOLS.has(tool.name)
           && isToolDiscoverable(this.tools.get(tool.name)!, event, context, previousSteps)
         )
@@ -123,7 +125,7 @@ export class AgentToolRegistry {
     toolName: string,
   ): AgentToolCapability | null {
     const tool = this.tools.get(toolName);
-    if (!tool || !isToolDiscoverable(tool, event, context, previousSteps)) return null;
+    if (!tool || !isAllowedForEvent(event, toolName) || !isToolDiscoverable(tool, event, context, previousSteps)) return null;
     return capabilityFor(tool);
   }
 
@@ -134,6 +136,9 @@ export class AgentToolRegistry {
   ): Promise<AgentToolResult> {
     const tool = this.tools.get(toolName);
     if (!tool) return { status: "error", summary: `Unknown tool '${toolName}'.`, error: "unknown_tool", retryable: false };
+    if (!isAllowedForEvent(context.event, toolName)) {
+      return { status: "denied", summary: `${toolName} is outside this turn's allowed tool set.`, error: "tool_not_allowed", retryable: false };
+    }
 
     const parsed = tool.schema.safeParse(rawInput);
     if (!parsed.success) {
@@ -175,7 +180,8 @@ export class AgentToolRegistry {
   }
 
   /** Validates planner-proposed continuation input before bypassing another planning call. */
-  public acceptsInput(toolName: string, rawInput: Record<string, unknown>): boolean {
+  public acceptsInput(toolName: string, rawInput: Record<string, unknown>, event?: AgentEvent): boolean {
+    if (event && !isAllowedForEvent(event, toolName)) return false;
     return this.tools.get(toolName)?.schema.safeParse(rawInput).success === true;
   }
 
@@ -234,7 +240,7 @@ export class AgentToolRegistry {
           input: Record<string, unknown>;
         }) => {
           const target = sourceNames.has(request.toolName) ? this.tools.get(request.toolName) : undefined;
-          if (!target || target.sideEffect !== "read") {
+          if (!target || target.sideEffect !== "read" || !isAllowedForEvent(context.event, request.toolName)) {
             return {
               toolName: request.toolName,
               status: "error" as const,
@@ -388,6 +394,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isAllowedForEvent(event: AgentEvent, toolName: string): boolean {
+  const allowed = event.constraints?.allowedToolNames;
+  return !allowed || allowed.includes(toolName);
+}
+
 function hasRole(actual: MemberRole[], required: MemberRole): boolean {
   if (required === "member") return actual.length > 0;
   if (required === "superuser") return actual.includes("superuser") || actual.includes("creator");
@@ -420,7 +431,18 @@ function isToolDiscoverable(
   ) return false;
   if (tool.name === "onboard_current_sender" && context.actor) return false;
   if (tool.name === "sync_if_stale" && !shouldExposeSync(previousSteps)) return false;
+  if (
+    ["inspect_spreadsheet", "query_spreadsheet"].includes(tool.name)
+    && hasCataloguedRetrievalAttempt(previousSteps)
+  ) return false;
   return true;
+}
+
+function hasCataloguedRetrievalAttempt(steps: AgentStep[]): boolean {
+  return steps.some((step) => {
+    if (step.decision.kind !== "tool" || step.decision.toolName !== "retrieve_choir_knowledge") return false;
+    return step.result?.status === "success";
+  });
 }
 
 /** Classifies thrown integration failures without coupling the agent to one provider. */

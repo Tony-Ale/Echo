@@ -1,31 +1,82 @@
 import assert from "node:assert/strict";
 import type { PineconeStore } from "@langchain/pinecone";
 import { retrieveDocuments } from "../domains/choir/intelligence/retrievalService.js";
-import { resolveRetrievalSources } from "../domains/choir/intelligence/retrievalSources.js";
+import {
+  resolveRetrievalSources,
+  retrievalSourceToolCatalogue,
+} from "../domains/choir/intelligence/retrievalSources.js";
 import {
   evidenceMatchesTemporalWindow,
   projectStructuredEvidence,
   projectTextEvidence,
 } from "../domains/choir/intelligence/evidenceProjector.js";
 import { compactEvidence } from "../domains/choir/intelligence/evidenceCompactor.js";
-import { findMatchingSheetTitle, projectMatchedCell, SheetsRepository } from "../integrations/googleSheets/sheetsRepository.js";
+import {
+  findMatchingSheetTitle,
+  normalizeSpreadsheetContainsValue,
+  projectMatchedCell,
+  SheetsRepository,
+} from "../integrations/googleSheets/sheetsRepository.js";
 import { AGENT_CONTEXT_LIMITS } from "../agent/runtime/contextLimits.js";
 import { reorganizeMonthlyRota } from "../integrations/googleSheets/helpers.js";
+import { extractSearchTerms, takeDistinctSearchResults } from "../agent/persistence/searchTerms.js";
+import { preserveTemporalQueryScope } from "../domains/choir/intelligence/temporalQuery.js";
 
 async function run(): Promise<void> {
   testDeterministicSourceResolution();
+  testRetrievalToolCatalogue();
   testTemporalEvidenceProjection();
+  testTemporalQueryScopePreservation();
   testTemporalEvidenceMatching();
   testSemanticEvidenceProjection();
   testMonthlyRotaUsesMondayServiceWeeks();
   testEvidenceCompactionPreservesValidRows();
   testNaturalSheetTitleResolution();
+  testSpreadsheetDateLocatorNormalization();
+  testDurableSearchTermExtraction();
   testMultilineSpreadsheetProjection();
   await testSheetBatchCache();
   await testMultiSourceStructuredRetrieval();
   await testEmptyStructuredSourceUsesBoundedFallback();
   await testStaleSemanticEvidenceDoesNotMatchTargetWeek();
   console.log("Retrieval routing self-tests passed.");
+}
+
+function testTemporalQueryScopePreservation(): void {
+  assert.match(
+    preserveTemporalQueryScope("unavailable members", "Who was unavailable yesterday?"),
+    /yesterday/,
+  );
+  assert.equal(
+    preserveTemporalQueryScope("unavailable on 2026-08-30", "Who was unavailable yesterday?"),
+    "unavailable on 2026-08-30",
+  );
+  assert.equal(
+    preserveTemporalQueryScope("choir members", "Who is in the choir?"),
+    "choir members",
+  );
+}
+
+function testDurableSearchTermExtraction(): void {
+  assert.deepEqual(extractSearchTerms("Rehearsal updates, rehearsal preference"), ["rehearsal", "updates", "preference"]);
+  assert.deepEqual(extractSearchTerms("a b valid-term", 2), ["valid-term"]);
+  assert.deepEqual(
+    takeDistinctSearchResults(["new question", "new question", "earlier statement"], (value) => value, 2),
+    ["new question", "earlier statement"],
+  );
+}
+
+function testSpreadsheetDateLocatorNormalization(): void {
+  assert.equal(normalizeSpreadsheetContainsValue("30-August-26 (Saturday)"), "30-August-26");
+  assert.equal(normalizeSpreadsheetContainsValue("30-August-26 (Sunday) ->"), "30-August-26");
+  assert.equal(normalizeSpreadsheetContainsValue("Member A: unavailable"), "Member A: unavailable");
+}
+
+function testRetrievalToolCatalogue(): void {
+  const catalogue = retrievalSourceToolCatalogue();
+  assert.match(catalogue, /attendance \(tab: 2026 attendance\): Member availability/);
+  assert.match(catalogue, /monthly_rota \(monthly tabs such as aug 26\): Weekly choir duties/);
+  assert.match(catalogue, /semantic_knowledge: Broad semantic search/);
 }
 
 function testMonthlyRotaUsesMondayServiceWeeks(): void {

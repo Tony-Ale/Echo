@@ -41,4 +41,17 @@ export function addTemporalContext(query: string){
     return {query, temporalData, augmentedQuery}
 }
 
+/**
+ * Keeps temporal scope from the active request when a concise planner query
+ * drops words such as "yesterday" or "this week". The planner still owns the
+ * information need and source selection; retrieval owns deterministic dates.
+ */
+export function preserveTemporalQueryScope(plannedQuery: string, requestText?: string): string {
+    const request = requestText?.trim()
+    if (!request) return plannedQuery
+    if (addTemporalContext(plannedQuery).temporalData.length > 0) return plannedQuery
+    if (addTemporalContext(request).temporalData.length === 0) return plannedQuery
+    return `${plannedQuery}\n\nCurrent request temporal scope: ${request}`
+}
+
 

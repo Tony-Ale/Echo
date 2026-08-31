@@ -8,6 +8,7 @@ import { buildHelpMessage } from "./helpText.js";
 import type { EchoAgentService } from "../agent/services/echoAgentService.js";
 import type { IdentityRepository, SyncCoordinator } from "../agent/ports.js";
 import type { ManualSundayReminderResult } from "../domains/choir/operations/choirScheduleService.js";
+import type { AgentTurnConstraints } from "../agent/types.js";
 import { mergeScheduledJobVisibility } from "./scheduleVisibility.js";
 
 interface SundayReminderActivator {
@@ -46,7 +47,7 @@ export class MessageRouter {
    * @param message Incoming bot message.
    * @returns Reply text or null if no response should be sent.
    */
-  public async handle(message: IncomingMessage): Promise<OutgoingMessage | null> {
+  public async handle(message: IncomingMessage, constraints?: AgentTurnConstraints): Promise<OutgoingMessage | null> {
     if (!message.text.trim()) {
       return this.recordDirectReply(message, { text: "Please include a question after mentioning me." });
     }
@@ -104,7 +105,7 @@ export class MessageRouter {
       return this.recordDirectReply(message, { text: formatScheduledJobsForWhatsApp(jobs) });
     }
 
-    return this.agentService.handleMessage(message);
+    return this.agentService.handleMessage(message, constraints);
   }
 
   private async recordDirectReply(message: IncomingMessage, reply: OutgoingMessage): Promise<OutgoingMessage> {

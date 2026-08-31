@@ -3,6 +3,7 @@ import type { ScheduledAgentTaskService } from "../agent/services/scheduledAgent
 import type { ScheduledJobCategory, ScheduledJobInfo } from "../integrations/scheduler/jobScheduler.js";
 import { sha256 } from "../shared/utils/hash.js";
 import type { WorkflowService } from "../workflows/workflowService.js";
+import { clockService } from "../shared/clockService.js";
 
 /** Projects durable schedule state into the scheduler's existing display model. */
 export class PersistentScheduleVisibility {
@@ -30,7 +31,9 @@ export class PersistentScheduleVisibility {
         nextRunAt: reminder.scheduledFor,
       })),
       ...obligations
-        .filter((obligation) => Boolean(obligation.dueAt))
+        // Waiting/failed operational state can remain useful in Supabase, but
+        // a past due time is not a pending schedule and must not be displayed.
+        .filter((obligation) => isFutureScheduleDate(obligation.dueAt))
         .map((obligation): ScheduledJobInfo => ({
           jobId: `agent-obligation-${obligation.id}`,
           category: obligationCategory(obligation.type),
@@ -51,6 +54,12 @@ export class PersistentScheduleVisibility {
       })),
     ];
   }
+}
+
+export function isFutureScheduleDate(value?: string): value is string {
+  if (!value) return false;
+  const timestamp = clockService.Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp > clockService.now().toMillis();
 }
 
 export function mergeScheduledJobVisibility(

@@ -14,6 +14,7 @@ export interface DateParseResult {
   ok: boolean;
   value?: ParsedReminderDate;
   reason?: string;
+  failure?: "missing" | "unrecognized" | "ambiguous" | "invalid" | "past";
 }
 
 const DEFAULT_TIME = { hour: 9, minute: 0 };
@@ -25,23 +26,32 @@ export function parseReminderDatePhrase(
 ): DateParseResult {
   const phrase = rawDatePhrase?.trim();
   if (!phrase) {
-    const result = { ok: false, reason: "Please include when I should remind you." };
+    const result: DateParseResult = { ok: false, failure: "missing", reason: "Please include when I should remind you." };
     logData({ rawDatePhrase, result }, "Reminder date parsing rejected empty phrase");
     return result;
   }
 
   const timezone = options.timezone ?? DEFAULT_ZONE;
   const now = (options.now ?? clockService.now(timezone)).setZone(timezone);
+  if (isExplicitlyPastRelativePhrase(phrase)) {
+    const result: DateParseResult = {
+      ok: false,
+      failure: "past",
+      reason: "That reminder time is in the past. Please choose a future time.",
+    };
+    logData({ phrase, now: now.toISO(), result }, "Reminder date parsing rejected explicit past direction");
+    return result;
+  }
   const results = chrono.en.GB.parse(phrase, now.toJSDate(), { forwardDate: true });
 
   if (results.length === 0) {
-    const result = { ok: false, reason: `I could not understand "${phrase}" as a future date.` };
+    const result: DateParseResult = { ok: false, failure: "unrecognized", reason: `I could not understand "${phrase}" as a future date.` };
     logData({ phrase, result }, "Reminder date parsing found no chrono results");
     return result;
   }
 
   if (results.length > 1) {
-    const result = { ok: false, reason: "That date sounds ambiguous. Please give me one clear date or time." };
+    const result: DateParseResult = { ok: false, failure: "ambiguous", reason: "That date sounds ambiguous. Please give me one clear date or time." };
     logData({ phrase, resultCount: results.length, result }, "Reminder date parsing rejected ambiguous phrase");
     return result;
   }
@@ -55,13 +65,13 @@ export function parseReminderDatePhrase(
   }
 
   if (!resolved.isValid) {
-    const result = { ok: false, reason: "That date is invalid. Please try a different date." };
+    const result: DateParseResult = { ok: false, failure: "invalid", reason: "That date is invalid. Please try a different date." };
     logData({ phrase, result }, "Reminder date parsing rejected invalid date");
     return result;
   }
 
   if (resolved <= now) {
-    const result = { ok: false, reason: "That reminder time is in the past. Please choose a future time." };
+    const result: DateParseResult = { ok: false, failure: "past", reason: "That reminder time is in the past. Please choose a future time." };
     logData({ phrase, resolved: resolved.toISO(), now: now.toISO(), result }, "Reminder date parsing rejected past date");
     return result;
   }
@@ -77,6 +87,11 @@ export function parseReminderDatePhrase(
   };
   logData({ phrase, parsed }, "Reminder date phrase parsed");
   return parsed;
+}
+
+/** Explicit past direction is authoritative and must never be shifted forward. */
+function isExplicitlyPastRelativePhrase(phrase: string): boolean {
+  return /\b(?:yesterday|last\s+(?:night|week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d+\s+(?:minutes?|hours?|days?|weeks?|months?|years?)\s+ago)\b/i.test(phrase);
 }
 
 /**

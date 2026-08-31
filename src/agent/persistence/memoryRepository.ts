@@ -6,6 +6,7 @@ import type { MemberProfile, MemoryBlock, MemoryBlockDirectoryEntry } from "../t
 import { normalizeName } from "./identityRepository.js";
 import { AGENT_TABLES } from "./tables.js";
 import { agentConfig } from "../../config/agentConfig.js";
+import { extractSearchTerms } from "./searchTerms.js";
 
 interface BlockRow {
   id: string;
@@ -123,17 +124,25 @@ export class SupabaseMemoryRepository implements MemoryRepository {
   public async getMemberFacts(memberId: string, limit: number, query?: string): Promise<string[]> {
     let request = this.client
       .from(AGENT_TABLES.memberFacts)
-      .select("fact")
+      .select("id, fact")
       .eq("member_id", memberId)
       .order("importance_rank", { ascending: false })
       .order("reinforcement_count", { ascending: false })
       .order("last_used_at", { ascending: false });
-    const search = query?.replace(/[^a-zA-Z0-9\s'-]/g, " ").replace(/\s+/g, " ").trim();
-    if (search) request = request.ilike("fact", `%${search}%`);
+    const terms = query ? extractSearchTerms(query) : [];
+    if (terms.length > 0) request = request.or(terms.map((term) => `fact.ilike.%${term}%`).join(","));
     const { data, error } = await request.limit(
       Math.max(1, Math.min(limit, agentConfig.context.memberMemory.maximumFacts)),
     );
     if (error) throw new Error(`Could not load member memory: ${error.message}`);
+    const recalledIds = (data ?? []).map((row) => String(row.id));
+    if (recalledIds.length > 0) {
+      const { error: recallError } = await this.client
+        .from(AGENT_TABLES.memberFacts)
+        .update({ last_used_at: clockService.now().toISO() })
+        .in("id", recalledIds);
+      if (recallError) throw new Error(`Could not update recalled member memory: ${recallError.message}`);
+    }
     return (data ?? []).map((row) => String(row.fact));
   }
 

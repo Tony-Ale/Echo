@@ -15,11 +15,19 @@ import { LocalChatTransport } from "./localChatTransport.js";
 import type { ReminderRecord } from "../../workflows/types.js";
 import { AgentActivityStream } from "./agentActivityStream.js";
 import { StagingTimelineRepository } from "./stagingTimelineRepository.js";
+import {
+  evaluateStagingRun,
+  stagingEvaluationSchema,
+  toTurnConstraints,
+  type StagingEvaluationResult,
+} from "./agentEvaluation.js";
+import { agentConfig } from "../../config/agentConfig.js";
 
 const messageSchema = z.object({
   actorId: z.string().uuid(),
   text: z.string().trim().min(1).max(4000),
   replyToMessageId: z.string().min(1).optional(),
+  evaluation: stagingEvaluationSchema.optional(),
 });
 const actorSchema = z.object({ displayName: z.string().trim().min(1).max(100) });
 const setClockSchema = z.object({ dateTime: z.string().trim().min(1).max(50) });
@@ -34,6 +42,7 @@ const advanceClockSchema = z.object({
 /** Starts the isolated browser-based staging group without loading Baileys. */
 export async function startLocalChatServer(input: { port: number; conversationId: string }): Promise<void> {
   const activity = new AgentActivityStream();
+  let latestEvaluation: StagingEvaluationResult | null = null;
   const timelineRepository = new StagingTimelineRepository();
   const application = await createEchoApplication({
     chatId: input.conversationId,
@@ -82,6 +91,7 @@ export async function startLocalChatServer(input: { port: number; conversationId
       await timelineRepository.reset(input.conversationId);
       transport.clearMessages();
       activity.clear();
+      latestEvaluation = null;
       application.workflowService.resetRuntimeState();
       change();
     } finally {
@@ -108,6 +118,14 @@ export async function startLocalChatServer(input: { port: number; conversationId
       actors: transport.listActors(),
       messages: transport.getMessages(),
       activity: activity.listThrough(now.toMillis()),
+      evaluationTools: application.agentTools.map(({ name, description, capability, sideEffect }) => ({
+        name,
+        description,
+        capability,
+        sideEffect,
+      })),
+      evaluationSettings: { maxSteps: agentConfig.execution.maxSteps },
+      latestEvaluation,
       schedules: getScheduledJobs(),
       obligations: await application.obligations.listActive(input.conversationId),
     });
@@ -193,12 +211,39 @@ export async function startLocalChatServer(input: { port: number; conversationId
       response.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid message." });
       return;
     }
+    const evaluation = parsed.data.evaluation;
+    if (evaluation) latestEvaluation = null;
     try {
+      if (evaluation) {
+        const knownTools = new Set(application.agentTools.map((tool) => tool.name));
+        const unknown = [...evaluation.allowedTools, ...evaluation.expectedTools]
+          .filter((name) => !knownTools.has(name));
+        if (unknown.length > 0) {
+          response.status(400).json({ error: `Unknown evaluation tool: ${[...new Set(unknown)].join(", ")}.` });
+          return;
+        }
+      }
       const incoming = transport.createIncoming(parsed.data);
       transport.recordIncoming(incoming, parsed.data.actorId);
-      const reply = await application.messageRouter.handle(incoming);
+      const reply = await application.messageRouter.handle(
+        incoming,
+        evaluation ? toTurnConstraints(evaluation) : undefined,
+      );
       if (reply) await transport.send(input.conversationId, { ...reply, replyToMessageId: reply.replyToMessageId ?? incoming.id });
-      response.json({ ok: true });
+      // Unknown staging participants may be onboarded during this turn. Refresh
+      // only that participant path so the UI reflects the authoritative DB state
+      // without adding a directory read to every message.
+      if (!incoming.metadata.actorMemberId) await transport.refreshActors();
+      if (evaluation) {
+        latestEvaluation = evaluateStagingRun({
+          messageId: incoming.id,
+          eventKey: `${incoming.transport}:${incoming.conversationId}:${incoming.id}`,
+          evaluation,
+          activity: activity.list(),
+          replyText: reply?.text,
+        });
+      }
+      response.json({ ok: true, evaluation: evaluation ? latestEvaluation : null });
     } catch (error) {
       response.status(500).json({ error: error instanceof Error ? error.message : "Message processing failed." });
     }

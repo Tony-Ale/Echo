@@ -1,4 +1,4 @@
-const state = { actors: [], messages: [], activity: [], replyToMessageId: undefined };
+const state = { actors: [], messages: [], activity: [], evaluationTools: [], evaluationMaxSteps: 2, latestEvaluation: null, replyToMessageId: undefined };
 const elements = {
   actorSelect: document.querySelector("#actor-select"), actorRole: document.querySelector("#actor-role"),
   messages: document.querySelector("#messages"), composer: document.querySelector("#composer"),
@@ -11,6 +11,15 @@ const elements = {
   operationsClock: document.querySelector("#operations-clock"), clockMode: document.querySelector("#clock-mode"),
   mockDateTime: document.querySelector("#mock-date-time"), clockStatus: document.querySelector("#clock-status"),
   activity: document.querySelector("#activity"),
+  evaluationEnabled: document.querySelector("#evaluation-enabled"),
+  evaluationFields: document.querySelector("#evaluation-fields"),
+  evaluationMode: document.querySelector("#evaluation-mode"),
+  evaluationTools: document.querySelector("#evaluation-tools"),
+  evaluationMaxSteps: document.querySelector("#evaluation-max-steps"),
+  evaluationHistory: document.querySelector("#evaluation-history"),
+  evaluationExpectedTools: document.querySelector("#evaluation-expected-tools"),
+  evaluationExpectedAnswer: document.querySelector("#evaluation-expected-answer"),
+  evaluationResult: document.querySelector("#evaluation-result"),
 };
 
 async function loadState() {
@@ -20,7 +29,11 @@ async function loadState() {
   state.actors = next.actors;
   state.messages = next.messages;
   state.activity = next.activity || [];
+  state.evaluationTools = next.evaluationTools || [];
+  state.evaluationMaxSteps = next.evaluationSettings?.maxSteps || 2;
+  state.latestEvaluation = next.latestEvaluation || null;
   renderActors(); renderMessages(); renderActivity(); renderOperations(next); renderClock(next);
+  renderEvaluationTools(); renderEvaluationSettings(); renderEvaluationResult();
 }
 
 async function loadOperations() {
@@ -228,13 +241,88 @@ async function sendMessage(event) {
   elements.sendButton.disabled = true; elements.sendStatus.textContent = "Echo is processing...";
   try {
     elements.sendStatus.classList.remove("error-text");
-    const response = await fetch("/api/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actorId, text, replyToMessageId: state.replyToMessageId }) });
+    const evaluation = buildEvaluationRequest();
+    if (evaluation) {
+      elements.evaluationResult.classList.remove("passed", "failed");
+      elements.evaluationResult.textContent = "Running controlled test...";
+    }
+    const response = await fetch("/api/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actorId, text, replyToMessageId: state.replyToMessageId, evaluation }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Message failed.");
     elements.input.value = ""; clearReply(); await loadState();
     elements.sendStatus.textContent = "Enter to send, Shift+Enter for a new line";
-  } catch (error) { elements.sendStatus.textContent = error.message; elements.sendStatus.classList.add("error-text"); }
+  } catch (error) {
+    elements.sendStatus.textContent = error.message; elements.sendStatus.classList.add("error-text");
+    if (elements.evaluationEnabled.checked) {
+      elements.evaluationResult.classList.add("failed");
+      elements.evaluationResult.textContent = `Run failed | ${error.message}`;
+    }
+  }
   finally { elements.sendButton.disabled = !elements.actorSelect.value; }
+}
+
+function buildEvaluationRequest() {
+  if (!elements.evaluationEnabled.checked) return undefined;
+  const allowedTools = [...elements.evaluationTools.querySelectorAll("input[type=checkbox]:checked")].map((input) => input.value);
+  if (allowedTools.length === 0) throw new Error("Select at least one available tool for the controlled run.");
+  return {
+    allowedTools,
+    maxSteps: Number(elements.evaluationMaxSteps.value),
+    includeRecentConversation: elements.evaluationHistory.checked,
+    expectedTools: splitExpectation(elements.evaluationExpectedTools.value),
+    expectedAnswerIncludes: splitExpectation(elements.evaluationExpectedAnswer.value),
+  };
+}
+
+function renderEvaluationTools() {
+  const currentNames = [...elements.evaluationTools.querySelectorAll("input")].map((input) => input.value);
+  const nextNames = state.evaluationTools.map((tool) => tool.name);
+  if (currentNames.join("|") === nextNames.join("|")) return;
+  const selected = new Set(currentNames.length ? currentNames.filter((_, index) => elements.evaluationTools.querySelectorAll("input")[index]?.checked) : nextNames);
+  elements.evaluationTools.replaceChildren(...state.evaluationTools.map((tool) => {
+    const label = document.createElement("label");
+    label.title = tool.description;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = tool.name;
+    input.checked = selected.has(tool.name);
+    const name = document.createElement("span");
+    name.textContent = readable(tool.name);
+    const capability = document.createElement("small");
+    capability.textContent = readable(tool.capability);
+    label.append(input, name, capability);
+    return label;
+  }));
+}
+
+function renderEvaluationSettings() {
+  elements.evaluationMaxSteps.max = String(state.evaluationMaxSteps);
+  if (!elements.evaluationMaxSteps.value || Number(elements.evaluationMaxSteps.value) > state.evaluationMaxSteps) {
+    elements.evaluationMaxSteps.value = String(state.evaluationMaxSteps);
+  }
+}
+
+function renderEvaluationResult() {
+  const result = state.latestEvaluation;
+  elements.evaluationResult.classList.remove("passed", "failed");
+  if (!result) {
+    elements.evaluationResult.textContent = "No controlled run yet.";
+    return;
+  }
+  const status = result.passed === null ? "Observed" : result.passed ? "Passed" : "Failed";
+  elements.evaluationResult.classList.add(result.passed === false ? "failed" : "passed");
+  const tools = result.actualTools.length ? result.actualTools.join(" -> ") : "No tools selected";
+  elements.evaluationResult.textContent = `${status} | ${tools}${result.issues.length ? ` | ${result.issues.join(" ")}` : ""}`;
+}
+
+function setEvaluationEnabled() {
+  const enabled = elements.evaluationEnabled.checked;
+  elements.evaluationFields.disabled = !enabled;
+  elements.evaluationMode.textContent = enabled ? "On" : "Off";
+}
+
+function splitExpectation(value) {
+  return value.split(",").map((part) => part.trim()).filter(Boolean);
 }
 
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", async () => {
@@ -245,6 +333,7 @@ document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click",
 elements.composer.addEventListener("submit", sendMessage);
 elements.input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); elements.composer.requestSubmit(); } });
 elements.actorSelect.addEventListener("change", renderActorRole);
+elements.evaluationEnabled.addEventListener("change", setEvaluationEnabled);
 document.querySelector("#clear-reply").addEventListener("click", clearReply);
 document.querySelector("#refresh-operations").addEventListener("click", loadOperations);
 document.querySelector("#set-clock-form").addEventListener("submit", async (event) => {

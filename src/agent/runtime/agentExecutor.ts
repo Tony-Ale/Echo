@@ -109,8 +109,12 @@ export class EchoAgentExecutor {
       let workingContext = initialContext;
       let failures = 0;
       let queuedDecision: Extract<AgentDecision, { kind: "tool" }> | undefined;
+      const maxSteps = Math.min(
+        this.options.maxSteps,
+        Math.max(2, event.constraints?.maxSteps ?? this.options.maxSteps),
+      );
 
-      for (let step = 0; step < this.options.maxSteps; step += 1) {
+      for (let step = 0; step < maxSteps; step += 1) {
         // The initial context is a stable working set. Deeper state enters the
         // turn through explicit tools instead of repeating DB reads per step.
         const context = workingContext;
@@ -124,7 +128,7 @@ export class EchoAgentExecutor {
             ? "Using the next tool already validated by the previous plan"
             : step === 0 ? "Reviewing the request and available tools" : "Reviewing the latest tool result",
           step: step + 1,
-          maxSteps: this.options.maxSteps,
+            maxSteps,
         });
         const decision = queuedDecision ?? await runWithChildSignal(
           controller.signal,
@@ -134,7 +138,7 @@ export class EchoAgentExecutor {
             toolCatalog,
             availableCapabilities: this.tools.capabilitiesFor(event, context, steps),
             previousSteps: projectStepsForPlanner(steps),
-            maxSteps: this.options.maxSteps,
+            maxSteps,
           }, signal),
         );
         queuedDecision = undefined;
@@ -149,7 +153,7 @@ export class EchoAgentExecutor {
             ? `${continuingPlan ? "Next validated action:" : "Next action:"} ${readableName(decision.toolName)}`
             : "No further tool is needed",
           step: step + 1,
-          maxSteps: this.options.maxSteps,
+          maxSteps,
           plan: decision.plan?.map(sanitizeActivityText),
           tool: decision.kind === "tool" ? { name: decision.toolName } : undefined,
         });
@@ -169,7 +173,7 @@ export class EchoAgentExecutor {
             title: decision.kind === "defer" ? "Turn deferred" : "Response ready",
             detail: decision.message ? "Reply prepared for the conversation" : "Completed without sending a message",
             step: step + 1,
-            maxSteps: this.options.maxSteps,
+            maxSteps,
           });
           return result;
         }
@@ -205,7 +209,7 @@ export class EchoAgentExecutor {
               title: `Activated ${readableName(capability)}`,
               detail: "A requested capability was revealed; the agent will replan before execution",
               step: step + 1,
-              maxSteps: this.options.maxSteps,
+              maxSteps,
               tool: { name: activationDecision.toolName, summary: activationResult.summary },
             });
             continue;
@@ -276,7 +280,7 @@ export class EchoAgentExecutor {
           title: `Running ${readableName(decision.toolName)}`,
           detail: "Tool execution started",
           step: step + 1,
-          maxSteps: this.options.maxSteps,
+          maxSteps,
           tool: { name: decision.toolName, input: sanitizeActivityInput(decision.input) },
         });
         const toolStartedAt = performance.now();
@@ -330,7 +334,7 @@ export class EchoAgentExecutor {
           title: `${readableName(decision.toolName)} ${toolResult.status === "error" ? "failed" : "finished"}`,
           detail: sanitizeActivityText(toolResult.summary),
           step: step + 1,
-          maxSteps: this.options.maxSteps,
+          maxSteps,
           tool: { name: decision.toolName, summary: sanitizeActivityText(toolResult.summary) },
         });
         steps.push({ step, decision, result: toolResult });
@@ -358,14 +362,14 @@ export class EchoAgentExecutor {
               ? "The tool prepared the conversation reply"
               : "The selected tool completed the operation without another planning step",
             step: step + 1,
-            maxSteps: this.options.maxSteps,
+          maxSteps,
           });
           return result;
         }
 
         if (toolResult.status === "success" && decision.nextTool) {
           const nextCallKey = sha256(`${event.eventKey}:${decision.nextTool.toolName}:${stableJson(decision.nextTool.input)}`);
-          if (!executedCalls.has(nextCallKey) && this.tools.acceptsInput(decision.nextTool.toolName, decision.nextTool.input)) {
+          if (!executedCalls.has(nextCallKey) && this.tools.acceptsInput(decision.nextTool.toolName, decision.nextTool.input, event)) {
             queuedDecision = {
               kind: "tool",
               toolName: decision.nextTool.toolName,

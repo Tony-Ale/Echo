@@ -22,7 +22,7 @@ import {
 import { AgentApprovalCoordinator } from "../agent/services/approvalCoordinator.js";
 import { clockService } from "../shared/clockService.js";
 import type { IncomingMessage } from "../framework/contracts/messages.js";
-import type { AgentActivitySink, ChoirKnowledgeService, ChoirWorkflowService, ScheduledDeliveryObserver, ScheduledMessagePolicy } from "../agent/ports.js";
+import type { AgentActivitySink, ChoirKnowledgeService, ChoirWorkflowService, ScheduledDeliveryObserver, ScheduledMessagePolicy, SpreadsheetDataService } from "../agent/ports.js";
 import type { ScheduledAgentTaskManager } from "../agent/ports.js";
 import { ChoirDeliveryObserver } from "../domains/choir/operations/choirDeliveryObserver.js";
 import { ChoirScheduleService } from "../domains/choir/operations/choirScheduleService.js";
@@ -34,11 +34,13 @@ import type { ConfiguredChatModel } from "../framework/models/types.js";
 import { formatScheduledJobsForWhatsApp, MessageRouter } from "../app/messageRouter.js";
 import type { ScheduledJobInfo } from "../integrations/scheduler/jobScheduler.js";
 import {
+  isSetlistLeadershipRole,
   RotaReminderService,
   type WeeklyScheduleAssessor,
 } from "../domains/choir/operations/rotaReminderService.js";
 import { SetlistOperationsService } from "../domains/choir/operations/setlistOperationsService.js";
 import { agentConfig } from "../config/agentConfig.js";
+import { isFutureScheduleDate } from "../app/scheduleVisibility.js";
 
 const CHAT_ID = "choir@g.us";
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -53,6 +55,7 @@ async function run(): Promise<void> {
     await testDurableCreatorApproval();
     await testSchedulerSemanticSkip();
     await testCompoundSundayRotaReminder();
+    testSetlistLeaderRoleSelection();
     await testMidweekAssignmentIsIndependentOfSundayCancellation();
     await testCachedWeeklyInterpretationOmitsBulkyEvidence();
     await testScheduledDeliveryRequiresGatedTool();
@@ -65,11 +68,14 @@ async function run(): Promise<void> {
     await testCreatorCanTriggerSundayReminderPrivately();
     await testMemberCannotTriggerSundayReminder();
     testScheduleOutputIsChronologicalAndReadable();
+    testPastDurableStateIsNotASchedule();
     await testSundaySetlistPlanningTargetsUpcomingWeek();
     await testPartialOptionalCoverageDoesNotExposeSync();
     await testSkippedSyncDoesNotPermitRepeatedRetrieval();
     await testAtomicToolCompletesWithoutReplanning();
     await testNonTerminalToolPreservesAgenticLoop();
+    await testConstrainedGenericSpreadsheetEvaluation();
+    await testAggregateQueryBroadensBeforeClaimingAbsence();
     await testValidatedNextToolAvoidsPlannerRoundTrip();
     await testDuplicateNextToolIsDiscarded();
     await testInvalidNextToolIsDiscarded();
@@ -111,6 +117,20 @@ async function run(): Promise<void> {
   }
 }
 
+function testSetlistLeaderRoleSelection(): void {
+  assert.equal(isSetlistLeadershipRole("Workers prayer worship"), false);
+  assert.equal(isSetlistLeadershipRole("Opening prayer and worship"), false);
+  assert.equal(isSetlistLeadershipRole("Hymn, worship & praise"), true);
+  assert.equal(isSetlistLeadershipRole("Praise & Worship"), true);
+  assert.equal(isSetlistLeadershipRole("Worship"), true);
+}
+
+function testPastDurableStateIsNotASchedule(): void {
+  assert.equal(isFutureScheduleDate("2026-08-11T09:59:59+01:00"), false);
+  assert.equal(isFutureScheduleDate("2026-08-11T10:00:01+01:00"), true);
+  assert.equal(isFutureScheduleDate("invalid"), false);
+}
+
 async function testCompoundSundayRotaReminder(): Promise<void> {
   const identities = identityDirectory();
   const weeklyInterpretations = new InMemoryWeeklyInterpretationRepository();
@@ -136,7 +156,7 @@ async function testCompoundSundayRotaReminder(): Promise<void> {
         "- Bible study P&W: Member",
         "Sunday 23/08/2026",
         "- Workers prayer worship: Member",
-        "- Hymn, worship & praise (Hymn - Great Is Thy Faithfulness)",
+        "- Hymn, worship & praise: Member (Hymn - Great Is Thy Faithfulness)",
         "- Special ministration (I will sing)",
         "- Offering, welcome & family song",
         "- Uniform (Ladies: white; Men: black)",
@@ -178,7 +198,7 @@ async function testCompoundSundayRotaReminder(): Promise<void> {
 
   assert.equal(first.status, "ready");
   assert.match(first.reply?.text ?? "", /Bible study P&W: @Member/);
-  assert.match(first.reply?.text ?? "", /Hymn, worship & praise \(Hymn - Great Is Thy Faithfulness\)/);
+  assert.match(first.reply?.text ?? "", /Hymn, worship & praise: @Member \(Hymn - Great Is Thy Faithfulness\)/);
   assert.match(first.reply?.text ?? "", /Special ministration \(I will sing\)/);
   assert.match(first.reply?.text ?? "", /Offering, welcome & family song/);
   assert.match(first.reply?.text ?? "", /Uniform \(Ladies: white; Men: black\)/);
@@ -2246,6 +2266,28 @@ async function testCapabilityCatalogActivation(): Promise<void> {
   }]);
   assert.equal(activated.some((tool) => tool.name === "add_member_identifier"), true);
 
+  const afterCataloguedEvidence = runtime.tools.catalogFor(
+    transportEvent("catalogue-complete", "Who is unavailable?"),
+    context,
+    [{
+    step: 0,
+    decision: {
+      kind: "tool",
+      toolName: "retrieve_choir_knowledge",
+      input: { query: "attendance", sourceIds: ["attendance"], semanticSearch: false },
+      reason: "Read the catalogued attendance source.",
+    },
+    result: {
+      status: "success",
+      summary: "Attendance evidence retrieved.",
+      data: { evidenceQuality: { status: "sparse" } },
+    },
+    }],
+  );
+  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "inspect_spreadsheet"), false);
+  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "query_spreadsheet"), false);
+  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "retrieve_choir_knowledge"), true);
+
   assert.equal(runtime.tools.activationForTool(event, context, [], "onboard_current_sender"), null);
 
   const redundantOnboarding = await runtime.tools.execute("onboard_current_sender", {}, {
@@ -2419,6 +2461,141 @@ async function testBoundedMemberMemory(): Promise<void> {
   assert.equal(facts.includes("Preference 5"), false);
 }
 
+async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
+  const expectedTools = ["get_current_time", "inspect_spreadsheet", "query_spreadsheet"];
+  const planner = new ScriptedAgentPlanner((input) => {
+    assert.deepEqual(input.toolCatalog.map((tool) => tool.name).sort(), [...expectedTools].sort());
+    if (input.previousSteps.length === 0) {
+      return { kind: "tool", toolName: "get_current_time", input: {}, reason: "Resolve yesterday." };
+    }
+    if (input.previousSteps.length === 1) {
+      return {
+        kind: "tool",
+        toolName: "inspect_spreadsheet",
+        input: { sheetName: "2026 attendance sheet" },
+        reason: "Discover the named tab's structure.",
+      };
+    }
+    if (input.previousSteps.length === 2) {
+      const inspection = input.previousSteps[1]?.result?.data as Record<string, unknown>;
+      assert.equal(inspection.sampleIsPartial, true);
+      assert.deepEqual(inspection.columns, ["description", "attendance"]);
+      return {
+        kind: "tool",
+        toolName: "query_spreadsheet",
+        input: {
+          sheetName: "2026 attendance sheet",
+          filters: [{ column: "attendance", operator: "contains", value: "10-August-26" }],
+          selectColumns: ["description", "attendance"],
+          limit: 1,
+        },
+        reason: "Query the discovered multiline attendance column.",
+      };
+    }
+    return { kind: "respond", message: "Member A was unavailable.", reason: "The bounded row answers the request." };
+  });
+  const runtime = createRuntime(planner, {
+    id: CREATOR_ID,
+    canonicalName: "Creator",
+    displayName: "Creator",
+    roles: ["member", "superuser", "creator"],
+    status: "active",
+  }, {
+    maxSteps: 10,
+    spreadsheets: {
+      async inspectSheet(sheetName) {
+        return {
+          sheetName,
+          columns: ["description", "attendance"],
+          rowCount: 12,
+          sampleRows: [{ description: "January", attendance: "03-January-26 -> Member A: A" }],
+        };
+      },
+      async querySheet(input) {
+        assert.equal(input.filters[0]?.value, "10-August-26");
+        assert.equal(input.filters.length, 1, "Locate the multiline record before interpreting values within it.");
+        return {
+          sheetName: input.sheetName,
+          rows: [{ description: "August", attendance: "10-August-26 -> Member A: NA" }],
+          matchedRows: 1,
+          truncated: false,
+        };
+      },
+    },
+  });
+
+  const reply = await runtime.service.handleMessage(
+    incomingMessage("generic-sheet-evaluation", "From the 2026 attendance sheet, who was unavailable yesterday?"),
+    { allowedToolNames: expectedTools, maxSteps: 10, includeRecentConversation: false },
+  );
+  assert.equal(reply?.text, "Member A was unavailable.");
+  assert.deepEqual(runtime.journal.executions.map((execution) => execution.toolName), expectedTools);
+}
+
+async function testAggregateQueryBroadensBeforeClaimingAbsence(): Promise<void> {
+  let queryCalls = 0;
+  const planner = new ScriptedAgentPlanner((input) => {
+    if (input.previousSteps.length === 0) {
+      return { kind: "tool", toolName: "inspect_spreadsheet", input: { sheetName: "activity log" }, reason: "Discover columns." };
+    }
+    if (input.previousSteps.length === 1) {
+      return {
+        kind: "tool",
+        toolName: "query_spreadsheet",
+        input: {
+          sheetName: "activity log",
+          filters: [
+            { column: "records", operator: "contains", value: "2026-08-30" },
+            { column: "records", operator: "contains", value: "missing" },
+          ],
+          selectColumns: ["records"],
+        },
+        reason: "Attempt the requested lookup.",
+      };
+    }
+    if (input.previousSteps.length === 2) {
+      const queryDiagnostic = input.previousSteps[1]?.result?.data as Record<string, unknown>;
+      assert.equal(queryDiagnostic.needsBroaderRecordCheck, true);
+      return {
+        kind: "tool",
+        toolName: "query_spreadsheet",
+        input: {
+          sheetName: "activity log",
+          filters: [{ column: "records", operator: "contains", value: "2026-08-30" }],
+          selectColumns: ["records"],
+        },
+        reason: "Establish whether the dated record exists before interpreting its values.",
+      };
+    }
+    return { kind: "respond", message: "There is no record for that date.", reason: "The broader lookup also returned no row." };
+  });
+  const runtime = createRuntime(planner, {
+    id: CREATOR_ID,
+    canonicalName: "Creator",
+    displayName: "Creator",
+    roles: ["member", "superuser", "creator"],
+    status: "active",
+  }, {
+    maxSteps: 5,
+    spreadsheets: {
+      async inspectSheet(sheetName) {
+        return { sheetName, columns: ["records"], rowCount: 1, sampleRows: [{ records: "2026-08-29 -> complete" }] };
+      },
+      async querySheet(input) {
+        queryCalls += 1;
+        return { sheetName: input.sheetName, rows: [], matchedRows: 0, truncated: false };
+      },
+    },
+  });
+
+  const reply = await runtime.service.handleMessage(
+    incomingMessage("aggregate-query-broadening", "Which entries were missing on 2026-08-30?"),
+    { allowedToolNames: ["inspect_spreadsheet", "query_spreadsheet"], maxSteps: 5, includeRecentConversation: false },
+  );
+  assert.equal(reply?.text, "There is no record for that date.");
+  assert.equal(queryCalls, 2);
+}
+
 function createRuntime(
   planner: ScriptedAgentPlanner,
   actor: MemberIdentity | null,
@@ -2441,6 +2618,7 @@ function createRuntime(
     scheduledTasks?: ScheduledAgentTaskManager;
     rotaReminder?: RotaReminderService;
     setlistOperations?: SetlistOperationsService;
+    spreadsheets?: SpreadsheetDataService;
   } = {},
 ) {
   const identities = options.identities ?? identityDirectory();
@@ -2470,7 +2648,7 @@ function createRuntime(
     },
     workflows,
     scheduledTasks: options.scheduledTasks ?? unavailableScheduledTaskManager(),
-    spreadsheets: {
+    spreadsheets: options.spreadsheets ?? {
       async inspectSheet(sheetName) {
         return { sheetName, columns: [], rowCount: 0, sampleRows: [] };
       },

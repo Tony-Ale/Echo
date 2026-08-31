@@ -64,6 +64,7 @@ export interface EchoAgentRuntime {
   syncCoordinator: SyncCoordinator;
   identities: SupabaseIdentityRepository;
   scheduledTasks: ScheduledAgentTaskService;
+  toolCatalog: ReturnType<AgentToolRegistry["catalog"]>;
 }
 
 /**
@@ -249,7 +250,15 @@ export async function createEchoAgentRuntime(input: {
     return { result, procedure: tools.buildReusableProcedure(result.steps) };
   });
 
-  return { agentService, obligationScheduler, obligations, syncCoordinator, identities, scheduledTasks };
+  return {
+    agentService,
+    obligationScheduler,
+    obligations,
+    syncCoordinator,
+    identities,
+    scheduledTasks,
+    toolCatalog: tools.catalog(),
+  };
 }
 
 function validateProductionIdentities(directory: Array<{ roles: string[]; phone?: string; whatsappJid?: string }>): void {

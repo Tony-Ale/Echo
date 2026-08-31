@@ -151,7 +151,7 @@ export interface ConversationRepository {
     senderName?: string;
   }): Promise<void>;
   getRecent(chatId: string, limit: number): Promise<ConversationEntry[]>;
-  search(chatId: string, query: string, limit: number): Promise<ConversationEntry[]>;
+  search(chatId: string, query: string, limit: number, excludeExternalMessageId?: string): Promise<ConversationEntry[]>;
 }
 
 export interface AgentJournal {

@@ -30,7 +30,7 @@ export class DefaultAgentContextAssembler implements AgentContextAssembler {
       actor && loadMemberProfile
         ? this.memory.getBlock({ scopeType: "member", scopeId: actor.id, label: "member_profile" })
         : Promise.resolve(null),
-      event.source === "transport" && event.chatId
+      event.source === "transport" && event.chatId && event.constraints?.includeRecentConversation !== false
         ? this.conversations.getRecent(
             event.chatId,
             agentConfig.context.recentConversation.messageLimit,

@@ -20,13 +20,13 @@ export const TOOL_AGENT_PROMPT_PACK: PromptPack = {
       id: "runtime.context",
       kind: "runtime",
       order: 207,
-      content: `memoryDirectory lists available memory without values and only a bounded recent conversation is initially present. Use acquire_context only when deeper conversation, member, memory, obligation or identity context is necessary. Choir evidence belongs in retrieve_choir_knowledge or read_week_schedule. For explicitly named uncatalogued spreadsheet tabs, privileged users and owned scheduled objectives may inspect the schema and query only required columns. Never invent sheet or column names.`,
+      content: `memoryDirectory lists available memory without values and only a bounded recent conversation is initially present. Use acquire_context only when deeper conversation, member, memory, obligation or identity context is necessary. Choir evidence belongs in retrieve_choir_knowledge or read_week_schedule, even when a user calls a catalogued source a sheet or tab. Preserve the user's scope in every external-data tool input. For time-bound structured questions, resolve relative wording from context.now and include the literal date or date range in the retrieval query; a topic-only query is insufficient. Bounded retrieval can establish that the requested record was not found, but visible rows do not establish the first or last date covered by the whole source; never claim global source coverage from a bounded result. For explicitly named uncatalogued spreadsheet tabs, privileged users and owned scheduled objectives may inspect the schema and query only required columns. Inspection samples are structural and may be partial: when they do not establish the answer, query discovered columns before responding. For multiline aggregate cells, locate the requested record with the least sufficient literal key or date before interpreting values inside that line; do not add inferred date formatting or weekday text, and do not treat a combined zero-result filter as proof that the record exists. Never invent sheet or column names.`,
     },
     {
       id: "runtime.scheduled-tasks",
       kind: "runtime",
       order: 208,
-      content: `For scheduled_agent_task_due, carry out payload.objective now. previousProcedure is only a hint from earlier successful read-only tools: fetch fresh data, adjust time-sensitive inputs and replan when it no longer fits. Never create another scheduled task from a scheduled task.`,
+      content: `For scheduled_agent_task_due, carry out payload.objective now. Imperative operations belong to Echo: return their result instead of asking recipients to perform the operation. Ask recipients to act only when the objective itself explicitly requests such a reminder. previousProcedure is only a hint from earlier successful read-only tools: fetch fresh data, adjust time-sensitive inputs and replan when it no longer fits. Never create another scheduled task from a scheduled task.`,
     },
     {
       id: "runtime.scheduler",

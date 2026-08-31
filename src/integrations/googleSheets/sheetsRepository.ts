@@ -48,7 +48,11 @@ export class SheetsRepository implements SpreadsheetDataService {
       if (!match) throw new Error(`Column '${requested}' was not found in sheet '${input.sheetName}'.`);
       return match;
     };
-    const filters = input.filters.map((filter) => ({ ...filter, column: resolveColumn(filter.column) }));
+    const filters = input.filters.map((filter) => ({
+      ...filter,
+      column: resolveColumn(filter.column),
+      value: filter.operator === "contains" ? normalizeSpreadsheetContainsValue(filter.value) : filter.value,
+    }));
     const selected = input.selectColumns.map(resolveColumn);
     const matches = rows.filter((row) => filters.every((filter) => matchesFilter(row[filter.column] ?? "", filter.operator, filter.value)));
     return {
@@ -343,6 +347,17 @@ function matchesFilter(
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
+}
+
+/**
+ * A model may correctly resolve a date but attach the wrong weekday label.
+ * The date token is already a sufficient deterministic locator, so discard a
+ * derived weekday suffix instead of allowing it to create a false zero match.
+ */
+export function normalizeSpreadsheetContainsValue(value?: string): string | undefined {
+  if (!value) return value;
+  const match = value.trim().match(/^(\d{1,2}[-/](?:[a-z]+|\d{1,2})[-/]\d{2,4})(?:\s*\((?:mon|tues|wednes|thurs|fri|satur|sun)day\))?(?:\s*(?:->|→))?\s*$/i);
+  return match?.[1] ?? value;
 }
 
 /** Keeps only matching lines when a filter targets a multiline aggregate cell. */

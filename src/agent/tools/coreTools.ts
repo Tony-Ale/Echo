@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { DateTime } from "luxon";
-import { RETRIEVAL_SOURCE_IDS } from "../../domains/choir/intelligence/retrievalSources.js";
+import {
+  RETRIEVAL_SOURCE_IDS,
+  retrievalSourceToolCatalogue,
+} from "../../domains/choir/intelligence/retrievalSources.js";
+import { preserveTemporalQueryScope } from "../../domains/choir/intelligence/temporalQuery.js";
 import { clockService } from "../../shared/clockService.js";
 import { sha256 } from "../../shared/utils/hash.js";
 import { agentConfig } from "../../config/agentConfig.js";
@@ -81,7 +85,7 @@ function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool
     .describe('{"sheetName":"exact spreadsheet tab name supplied by the user or trusted context"}');
   return {
     name: "inspect_spreadsheet",
-    description: "Inspect the columns and a bounded sample of a specifically named spreadsheet tab before building a deterministic query. Use only when the user explicitly identifies a sheet or a scheduled objective already contains one.",
+    description: "Inspect the columns and a bounded structural sample of an explicitly named uncatalogued spreadsheet tab before querying it. sampleRows may be partial and cannot prove that an unshown record is absent. Use catalogued choir sources through retrieve_choir_knowledge when that tool is available.",
     capability: "knowledge",
     schema,
     sideEffect: "read",
@@ -95,6 +99,8 @@ function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool
           : `Spreadsheet '${result.sheetName}' returned no usable rows or columns.`,
         data: {
           ...result,
+          sampledRowCount: result.sampleRows.length,
+          sampleIsPartial: result.sampleRows.length < result.rowCount,
           sampleRows: result.sampleRows.map(boundSpreadsheetRow),
         },
       };
@@ -125,20 +131,39 @@ function querySpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
   }));
   return {
     name: "query_spreadsheet",
-    description: "Query a specifically named spreadsheet tab with deterministic filters and a bounded projection. Inspect the sheet first; never invent column names. This returns current rows, not a final message.",
+    description: "Query a specifically named uncatalogued spreadsheet tab with deterministic filters and a bounded projection. Inspect first and use only discovered columns. selectColumns must contain at least one column. For a multiline aggregate cell, first filter by the least sufficient record identity or literal date and inspect the projected line; do not append an inferred weekday or combine that locator with the answer value because either can create a false zero match. This returns current rows, not a final message.",
     capability: "knowledge",
     schema,
     sideEffect: "read",
     requiresRole: "superuser",
     async execute(input) {
       const result = await spreadsheets.querySheet(input);
+      const needsBroaderRecordCheck = result.matchedRows === 0 && hasRepeatedContainsFilters(input.filters);
       return {
         status: "success",
-        summary: `${result.matchedRows} spreadsheet row(s) matched the deterministic query.`,
-        data: { ...result, rows: result.rows.map(boundSpreadsheetRow) },
+        summary: needsBroaderRecordCheck
+          ? "No rows matched the combined filters on one aggregate column. Query the record again using only its identifying date or key before concluding that the requested value is absent."
+          : `${result.matchedRows} spreadsheet row(s) matched the deterministic query.`,
+        data: {
+          ...result,
+          rows: result.rows.map(boundSpreadsheetRow),
+          ...(needsBroaderRecordCheck ? { needsBroaderRecordCheck: true } : {}),
+        },
       };
     },
   };
+}
+
+function hasRepeatedContainsFilters(
+  filters: Array<{ column: string; operator: string; value?: string }>,
+): boolean {
+  const countByColumn = new Map<string, number>();
+  for (const filter of filters) {
+    if (filter.operator !== "contains" || !filter.value?.trim()) continue;
+    const column = filter.column.trim().toLowerCase();
+    countByColumn.set(column, (countByColumn.get(column) ?? 0) + 1);
+  }
+  return [...countByColumn.values()].some((count) => count > 1);
 }
 
 function boundSpreadsheetRow(row: Record<string, string>): Record<string, string> {
@@ -723,11 +748,14 @@ function retrieveKnowledgeTool(knowledge: ChoirKnowledgeService): AgentTool {
   }).describe('{"query":"standalone information need","sourceIds":["one or more semantic source IDs"],"semanticSearch":false}');
   return {
     name: "retrieve_choir_knowledge",
-    description: `Retrieve current choir evidence from one or more semantic sources. Available source IDs: ${RETRIEVAL_SOURCE_IDS.join(", ")}. Select every materially relevant source and use semanticSearch for ambiguous or unstructured needs. Returns evidence and provenance, not a final answer.`,
+    description: `Retrieve current choir evidence from catalogued sources, including when a user calls one a sheet or tab. Catalogue: ${retrievalSourceToolCatalogue()}. Select every materially relevant source. Preserve requested scope: time-bound structured queries must contain a resolved literal date or date range derived from the current turn time, not only a topic. Keep semanticSearch=false for exact structured dates, assignments, names and statuses; enable it only for ambiguous or unstructured needs. Returns evidence and provenance, not a final answer.`,
     schema,
     sideEffect: "read",
-    async execute(input) {
-      const result = await knowledge.retrieve(input.query, {
+    async execute(input, context) {
+      const requestText = context.event.message?.text
+        ?? (typeof context.event.payload.objective === "string" ? context.event.payload.objective : undefined);
+      const query = preserveTemporalQueryScope(input.query, requestText);
+      const result = await knowledge.retrieve(query, {
         sourceIds: input.sourceIds,
         semanticSearch: input.semanticSearch,
       });
@@ -974,7 +1002,7 @@ function listObligationsTool(obligations: ObligationRepository): AgentTool {
 function searchConversationHistoryTool(conversations: ConversationRepository): AgentTool {
   const schema = z.object({
     query: z.string().trim().min(2).max(300),
-    limit: z.number().int().min(1)
+    limit: z.number().int().min(agentConfig.context.historySearch.defaultLimit)
       .max(agentConfig.context.historySearch.maximumLimit)
       .default(agentConfig.context.historySearch.defaultLimit),
   }).describe('{"query":"terms describing the earlier conversation","limit":5}');
@@ -986,7 +1014,7 @@ function searchConversationHistoryTool(conversations: ConversationRepository): A
     async execute(input, context) {
       const chatId = context.event.chatId;
       if (!chatId) return { status: "error", summary: "Conversation search requires a current chat.", error: "missing_chat" };
-      const matches = await conversations.search(chatId, input.query, input.limit);
+      const matches = await conversations.search(chatId, input.query, input.limit, context.event.message?.id);
       const compact = matches.map((entry) => ({
         ...entry,
         content: entry.content.slice(0, AGENT_CONTEXT_LIMITS.historySearchMessageCharacters),

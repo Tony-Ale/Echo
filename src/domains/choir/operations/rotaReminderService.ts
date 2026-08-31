@@ -208,7 +208,7 @@ export class RotaReminderService {
     const worshipPraiseLeaderNames = unique(schedule.sections
       .filter((section) => section.date.hasSame(monday.plus({ days: 6 }), "day"))
       .flatMap((section) => section.items
-        .filter((item) => /(?:worship|praise|p\s*&\s*w)/i.test(item.role))
+        .filter((item) => isSetlistLeadershipRole(item.role))
         .flatMap((item) => item.leaderNames)));
     const hasMidweekAssignments = hasDatedAssignments(schedule, monday.plus({ days: 2 }));
     const hasSundayAssignments = hasDatedAssignments(schedule, monday.plus({ days: 6 }));
@@ -278,6 +278,13 @@ export class RotaReminderService {
       expiresAt: input.expiresAt,
     });
   }
+}
+
+/** Distinguishes the main setlist leader from prayer assignments that happen to mention worship. */
+export function isSetlistLeadershipRole(role: string): boolean {
+  const isPraiseRole = /(?:\bpraise\b|p\s*&\s*w)/i.test(role);
+  if (/\bprayer\b/i.test(role) && !isPraiseRole) return false;
+  return isPraiseRole || /\bworship\b/i.test(role);
 }
 
 interface RotaItem {

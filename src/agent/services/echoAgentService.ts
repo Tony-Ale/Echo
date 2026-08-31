@@ -7,7 +7,7 @@ import type {
   ScheduledDeliveryObserver,
   ScheduledMessagePolicy,
 } from "../ports.js";
-import type { AgentEvent, AgentTurnResult } from "../types.js";
+import type { AgentEvent, AgentTurnConstraints, AgentTurnResult } from "../types.js";
 import type { EchoAgentExecutor } from "../runtime/agentExecutor.js";
 import type { AgentApprovalCoordinator } from "./approvalCoordinator.js";
 import type { ScheduledAgentTaskService } from "./scheduledAgentTaskService.js";
@@ -35,7 +35,7 @@ export class EchoAgentService {
     this.activeTransport = transport;
   }
 
-  public async handleMessage(message: IncomingMessage): Promise<OutgoingMessage | null> {
+  public async handleMessage(message: IncomingMessage, constraints?: AgentTurnConstraints): Promise<OutgoingMessage | null> {
     const approvalReply = await this.approvals?.handleReply(message);
     if (approvalReply !== undefined) {
       if (approvalReply) await this.recordDeterministicExchange(message, approvalReply);
@@ -47,6 +47,7 @@ export class EchoAgentService {
       type: "message_received",
       chatId: message.conversationId,
       message,
+      constraints,
       payload: {
         transport: message.transport,
         quotedMessageId: message.quotedMessage?.id,

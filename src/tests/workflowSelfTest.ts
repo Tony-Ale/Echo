@@ -182,6 +182,12 @@ async function run(): Promise<void> {
     now: DateTime.fromISO("2026-05-15T10:00:00", { zone: "Europe/London" }),
   });
   assert.equal(past.ok, false);
+  assert.equal(past.failure, "past");
+  const pastWithTime = parseReminderDatePhrase("yesterday at 3pm", {
+    now: DateTime.fromISO("2026-05-15T10:00:00", { zone: "Europe/London" }),
+  });
+  assert.equal(pastWithTime.ok, false);
+  assert.equal(pastWithTime.failure, "past");
   assert.equal(isExplicitWorkflowActivation("you remind me of my music teacher"), false);
   assert.equal(isExplicitWorkflowActivation("remind me tomorrow about rehearsal"), true);
   assert.equal(isExplicitWorkflowActivation("set a reminder for tomorrow"), true);

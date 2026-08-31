@@ -10,6 +10,7 @@ import type {
   ObligationStatus,
 } from "../types.js";
 import { AGENT_TABLES } from "./tables.js";
+import { extractSearchTerms, takeDistinctSearchResults } from "./searchTerms.js";
 
 interface ObligationRow {
   id: string;
@@ -131,19 +132,27 @@ export class SupabaseConversationRepository implements ConversationRepository {
     return (data ?? []).reverse().map(fromConversationRow);
   }
 
-  public async search(chatId: string, query: string, limit: number): Promise<ConversationEntry[]> {
-    const terms = query.toLowerCase().match(/[a-z0-9]{2,}/g)?.slice(0, 5) ?? [];
+  public async search(chatId: string, query: string, limit: number, excludeExternalMessageId?: string): Promise<ConversationEntry[]> {
+    const terms = extractSearchTerms(query);
     if (terms.length === 0) return [];
     const filters = terms.map((term) => `content.ilike.%${term}%`).join(",");
-    const { data, error } = await this.client
+    let request = this.client
       .from(AGENT_TABLES.conversationMessages)
       .select("role, content, created_at, sender_name_snapshot, echo_members(display_name)")
       .eq("chat_id", chatId)
       .or(filters)
-      .order("created_at", { ascending: false })
-      .limit(Math.max(1, Math.min(limit, 20)));
+      .order("created_at", { ascending: false });
+    if (excludeExternalMessageId) request = request.neq("external_message_id", excludeExternalMessageId);
+    const boundedLimit = Math.max(1, Math.min(limit, 20));
+    const candidateLimit = Math.min(20, boundedLimit * 4);
+    const { data, error } = await request.limit(candidateLimit);
     if (error) throw new Error(`Could not search conversation history: ${error.message}`);
-    return (data ?? []).reverse().map(fromConversationRow);
+    const distinct = takeDistinctSearchResults(
+      (data ?? []).map(fromConversationRow),
+      (entry) => `${entry.role}|${entry.senderName ?? ""}|${entry.content}`,
+      boundedLimit,
+    );
+    return distinct.reverse();
   }
 }
 

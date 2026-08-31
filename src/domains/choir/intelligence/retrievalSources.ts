@@ -83,3 +83,13 @@ export function resolveRetrievalSources(
 export function retrievalSourceDescription(sourceId: RetrievalSourceId): string {
   return RETRIEVAL_SOURCE_CATALOG.find((item) => item.id === sourceId)?.description ?? sourceId;
 }
+
+/** Compact, centrally generated catalogue embedded in the retrieval tool contract. */
+export function retrievalSourceToolCatalogue(): string {
+  return RETRIEVAL_SOURCE_CATALOG.map((source) => {
+    const target = source.mode === "monthly_sheet"
+      ? "monthly tabs such as aug 26"
+      : source.sheetName ? `tab: ${source.sheetName}` : undefined;
+    return `${source.id}${target ? ` (${target})` : ""}: ${source.description}`;
+  }).join(" | ");
+}

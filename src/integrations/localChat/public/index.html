@@ -68,6 +68,41 @@
               </div>
               <button id="clear-reply" class="icon-button" type="button" title="Cancel reply" aria-label="Cancel reply">X</button>
             </div>
+            <details id="evaluation-controls" class="evaluation-controls">
+              <summary>
+                <span>Controlled agent test</span>
+                <span id="evaluation-mode" class="muted">Off</span>
+              </summary>
+              <div class="evaluation-body">
+                <label class="toggle-row" for="evaluation-enabled">
+                  <input id="evaluation-enabled" type="checkbox" />
+                  <span>Restrict this run</span>
+                </label>
+                <fieldset id="evaluation-fields" disabled>
+                  <legend>Available tools</legend>
+                  <div id="evaluation-tools" class="tool-options"></div>
+                  <div class="evaluation-grid">
+                    <label>
+                      <span>Maximum steps</span>
+                      <input id="evaluation-max-steps" type="number" min="2" />
+                    </label>
+                    <label class="toggle-row history-toggle" for="evaluation-history">
+                      <input id="evaluation-history" type="checkbox" checked />
+                      <span>Include recent chat</span>
+                    </label>
+                    <label>
+                      <span>Expected tools</span>
+                      <input id="evaluation-expected-tools" placeholder="tool_a, tool_b" />
+                    </label>
+                    <label>
+                      <span>Response must include</span>
+                      <input id="evaluation-expected-answer" placeholder="name, date" />
+                    </label>
+                  </div>
+                </fieldset>
+                <div id="evaluation-result" class="evaluation-result muted" aria-live="polite"></div>
+              </div>
+            </details>
             <label class="sr-only" for="message-input">Message Echo</label>
             <textarea id="message-input" data-testid="message-input" rows="2" maxlength="4000" placeholder="Message Echo as the selected member"></textarea>
             <div class="composer-footer">

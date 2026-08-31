@@ -22,6 +22,7 @@ import { LangChainModelRegistry } from "../integrations/models/modelRegistry.js"
 import { PersistentScheduleVisibility } from "./scheduleVisibility.js";
 
 export interface EchoApplication {
+  agentTools: Awaited<ReturnType<typeof createEchoAgentRuntime>>["toolCatalog"];
   agentService: Awaited<ReturnType<typeof createEchoAgentRuntime>>["agentService"];
   choirScheduleService: ChoirScheduleService;
   identities: Awaited<ReturnType<typeof createEchoAgentRuntime>>["identities"];
@@ -92,6 +93,7 @@ export async function createEchoApplication(input: {
   );
 
   return {
+    agentTools: runtime.toolCatalog,
     agentService: runtime.agentService,
     choirScheduleService,
     identities: runtime.identities,

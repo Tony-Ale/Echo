@@ -13,11 +13,9 @@ export function getHeaderRowIndexForMonthlyRotaSheet(sheetName: string): number 
 }
 
 // Sheet name constants
-export const UNIFORM_2026_DRAFT = "uniform 2026 draft";
 export const ORIGINALS_2026_ROTA = "2026 originals rota";
 export const DOCUMENTS_AND_RESOURCES = "documents and resources";
 export const EVENTS_2026 = "2026 events";
-export const CALENDAR_2026 = "2026 calendar";
 export const MEMBERS = "members";
 export const SM_LIBRARY = "sm library";
 export const ATTENDANCE = "2026 attendance";
@@ -27,11 +25,9 @@ export const smallSheets = [EVENTS_2026, MEMBERS, DOCUMENTS_AND_RESOURCES, ORIGI
 
 // Map of sheet name constants to header row index
 export const sheetNameHeaderIndexMap = {
-    //[UNIFORM_2026_DRAFT]: 8,
     [ORIGINALS_2026_ROTA]: 1,
     [DOCUMENTS_AND_RESOURCES]: 2,
     [EVENTS_2026]: 1,
-    //[CALENDAR_2026]: 1, from the sheet it seems like the same thing with events sheet
     [MEMBERS]: 0,
     [SM_LIBRARY]: 0,
     [ATTENDANCE]: 10

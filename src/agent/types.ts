@@ -12,6 +12,14 @@ export interface AgentEvent {
   payload: Record<string, unknown>;
   /** Backend-resolved actor for trusted system activations such as owned tasks. */
   actorMemberId?: string;
+  /** Optional runtime limits may narrow one turn but never grant capabilities or exceed application limits. */
+  constraints?: AgentTurnConstraints;
+}
+
+export interface AgentTurnConstraints {
+  allowedToolNames?: string[];
+  maxSteps?: number;
+  includeRecentConversation?: boolean;
 }
 
 export type MemberRole = "member" | "superuser" | "creator";

@@ -309,6 +309,9 @@ export class WorkflowService {
   private async parseReminderDateWithFallback(rawDatePhrase: string | undefined): Promise<ReturnType<typeof parseReminderDatePhrase>> {
     const firstPass = parseReminderDatePhrase(rawDatePhrase);
     if (firstPass.ok) return firstPass;
+    // Semantic normalization may clarify unfamiliar wording, but it must not
+    // reinterpret deterministically unsafe or incomplete input as schedulable.
+    if (!firstPass.failure || !["unrecognized", "ambiguous"].includes(firstPass.failure)) return firstPass;
 
     const phrase = rawDatePhrase?.trim();
     if (!phrase) return firstPass;
