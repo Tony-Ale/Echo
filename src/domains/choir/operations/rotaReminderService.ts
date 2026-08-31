@@ -23,6 +23,12 @@ const scheduleAssessmentSchema = z.object({
   ambiguities: z.array(z.string().trim().min(1).max(300)).max(8),
 });
 
+// Model-authored explanations are normalized before they enter the stricter
+// domain contract. Operational values remain strictly typed and untouched.
+const rawScheduleAssessmentSchema = scheduleAssessmentSchema.extend({
+  ambiguities: z.array(z.string()),
+});
+
 export type WeeklyScheduleAssessment = z.infer<typeof scheduleAssessmentSchema>;
 
 export interface WeeklyScheduleAssessor {
@@ -64,10 +70,10 @@ export class ModelWeeklyScheduleAssessor implements WeeklyScheduleAssessor {
     evidence: string;
     signal: AbortSignal;
   }): Promise<WeeklyScheduleAssessment> {
-    const structured = this.model.withStructuredOutput(scheduleAssessmentSchema, {
+    const structured = this.model.withStructuredOutput(rawScheduleAssessmentSchema, {
       name: "assess_weekly_rota_schedule",
     });
-    return structured.invoke([
+    const assessment = await structured.invoke([
       new SystemMessage([
         "Assess whether the evidence explicitly cancels or replaces the choir's dated Sunday activity for the exact Monday-to-Sunday window supplied, and whether a setlist is required.",
         "Use only the evidence. Understand Sunday cancellations, another group ministering, non-participation, and unusual service arrangements semantically.",
@@ -80,7 +86,21 @@ export class ModelWeeklyScheduleAssessor implements WeeklyScheduleAssessor {
         evidence: input.evidence.slice(0, MAX_ASSESSMENT_EVIDENCE_CHARACTERS),
       })),
     ], { signal: input.signal });
+    return normalizeScheduleAssessment(assessment);
   }
+}
+
+export function normalizeScheduleAssessment(
+  assessment: z.infer<typeof rawScheduleAssessmentSchema>,
+): WeeklyScheduleAssessment {
+  return scheduleAssessmentSchema.parse({
+    ...assessment,
+    ambiguities: assessment.ambiguities
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+      .map((value) => value.slice(0, 300)),
+  });
 }
 
 /**

@@ -35,12 +35,15 @@ import { formatScheduledJobsForWhatsApp, MessageRouter } from "../app/messageRou
 import type { ScheduledJobInfo } from "../integrations/scheduler/jobScheduler.js";
 import {
   isSetlistLeadershipRole,
+  normalizeScheduleAssessment,
   RotaReminderService,
   type WeeklyScheduleAssessor,
 } from "../domains/choir/operations/rotaReminderService.js";
 import { SetlistOperationsService } from "../domains/choir/operations/setlistOperationsService.js";
 import { agentConfig } from "../config/agentConfig.js";
 import { isFutureScheduleDate } from "../app/scheduleVisibility.js";
+import { SupabaseAgentJournal } from "../agent/persistence/operationsRepository.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const CHAT_ID = "choir@g.us";
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -55,6 +58,8 @@ async function run(): Promise<void> {
     await testDurableCreatorApproval();
     await testSchedulerSemanticSkip();
     await testCompoundSundayRotaReminder();
+    testOversizedScheduleAmbiguitiesAreBounded();
+    await testInterruptedExecutionRecovery();
     testSetlistLeaderRoleSelection();
     await testMidweekAssignmentIsIndependentOfSundayCancellation();
     await testCachedWeeklyInterpretationOmitsBulkyEvidence();
@@ -115,6 +120,85 @@ async function run(): Promise<void> {
   } finally {
     clockService.clearMockTime();
   }
+}
+
+function testOversizedScheduleAmbiguitiesAreBounded(): void {
+  const assessment = normalizeScheduleAssessment({
+    sundayActivityCancelled: null,
+    setlistRequired: null,
+    summary: "The schedule needs clarification.",
+    ambiguities: ["x".repeat(450), "  ", ...Array.from({ length: 9 }, (_, index) => `Issue ${index + 1}`)],
+  });
+
+  assert.equal(assessment.ambiguities.length, 8);
+  assert.equal(assessment.ambiguities[0]?.length, 300);
+  assert.equal(assessment.ambiguities.includes(""), false);
+}
+
+async function testInterruptedExecutionRecovery(): Promise<void> {
+  const rows: RecoveryRows = {
+    echo_agent_events: [
+      { id: "old-event", status: "running", received_at: "2026-08-11T09:00:00.000+01:00" },
+      { id: "recent-event", status: "running", received_at: "2026-08-11T09:59:00.000+01:00" },
+      { id: "done-event", status: "completed", received_at: "2026-08-11T09:00:00.000+01:00" },
+    ],
+    echo_agent_turns: [
+      { id: "old-turn", status: "running", started_at: "2026-08-11T09:00:00.000+01:00" },
+      { id: "recent-turn", status: "running", started_at: "2026-08-11T09:59:00.000+01:00" },
+    ],
+    echo_tool_executions: [
+      { id: "old-tool", status: "running", started_at: "2026-08-11T09:00:00.000+01:00" },
+      { id: "recent-tool", status: "running", started_at: "2026-08-11T09:59:00.000+01:00" },
+    ],
+  };
+  const journal = new SupabaseAgentJournal(createRecoveryClient(rows));
+  const result = await journal.recoverInterruptedExecutions("2026-08-11T09:54:30.000+01:00");
+
+  assert.deepEqual(result, { events: 1, turns: 1, tools: 1 });
+  assert.equal(rows.echo_agent_events[0]?.status, "failed");
+  assert.equal(rows.echo_agent_turns[0]?.status, "failed");
+  assert.equal(rows.echo_tool_executions[0]?.status, "error");
+  assert.equal(rows.echo_tool_executions[0]?.error, "interrupted_before_completion");
+  assert.equal(rows.echo_agent_events[1]?.status, "running");
+  assert.equal(rows.echo_agent_turns[1]?.status, "running");
+  assert.equal(rows.echo_tool_executions[1]?.status, "running");
+  assert.equal(rows.echo_agent_events[2]?.status, "completed");
+
+  assert.deepEqual(
+    await journal.recoverInterruptedExecutions("2026-08-11T09:54:30.000+01:00"),
+    { events: 0, turns: 0, tools: 0 },
+  );
+}
+
+type RecoveryRow = Record<string, unknown> & { id: string; status: string };
+type RecoveryRows = Record<"echo_agent_events" | "echo_agent_turns" | "echo_tool_executions", RecoveryRow[]>;
+
+function createRecoveryClient(rows: RecoveryRows): SupabaseClient {
+  return {
+    from(table: keyof RecoveryRows) {
+      return {
+        update(values: Record<string, unknown>) {
+          const filters: Array<(row: RecoveryRow) => boolean> = [];
+          const query = {
+            eq(column: string, value: unknown) {
+              filters.push((row) => row[column] === value);
+              return query;
+            },
+            lte(column: string, value: string) {
+              filters.push((row) => String(row[column]) <= value);
+              return query;
+            },
+            async select() {
+              const changed = rows[table].filter((row) => filters.every((filter) => filter(row)));
+              for (const row of changed) Object.assign(row, values);
+              return { data: changed.map(({ id }) => ({ id })), error: null };
+            },
+          };
+          return query;
+        },
+      };
+    },
+  } as unknown as SupabaseClient;
 }
 
 function testSetlistLeaderRoleSelection(): void {

@@ -56,6 +56,10 @@ import {
   RotaReminderService,
 } from "../../domains/choir/operations/rotaReminderService.js";
 import { SetlistOperationsService } from "../../domains/choir/operations/setlistOperationsService.js";
+import { clockService } from "../../shared/clockService.js";
+import { logger } from "../../config/logger.js";
+
+const INTERRUPTED_EXECUTION_GRACE_MS = 30_000;
 
 export interface EchoAgentRuntime {
   agentService: EchoAgentService;
@@ -98,6 +102,14 @@ export async function createEchoAgentRuntime(input: {
   const obligations = new SupabaseObligationRepository();
   const conversations = new SupabaseConversationRepository();
   const journal = new SupabaseAgentJournal();
+  const interruptedCutoff = clockService.now().minus({
+    milliseconds: agentConfig.execution.turnTimeoutMs + INTERRUPTED_EXECUTION_GRACE_MS,
+  }).toISO();
+  if (interruptedCutoff) {
+    await journal.recoverInterruptedExecutions(interruptedCutoff).catch((error: unknown) => {
+      logger.warn({ error }, "Could not retire interrupted agent executions during startup");
+    });
+  }
   const weeklyInterpretations = input.weeklyInterpretations ?? new SupabaseWeeklyInterpretationRepository();
   const approvals = new SupabaseApprovalRepository();
   const scheduler = new ApplicationSchedulerAdapter();

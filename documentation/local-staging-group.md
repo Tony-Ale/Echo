@@ -24,6 +24,9 @@ Only the message transport is replaced by `LocalChatTransport`.
 
 The server refuses to start unless `.env.staging` contains `ECHO_ENVIRONMENT=staging`.
 
+For a repeatable end-to-end checklist, use
+[Live Integration Test Suite](live-integration-tests.md).
+
 ## Using The Group
 
 - Select a canonical member from **Speaking as**.

@@ -160,6 +160,44 @@ export class SupabaseConversationRepository implements ConversationRepository {
 export class SupabaseAgentJournal implements AgentJournal {
   public constructor(private readonly client: SupabaseClient = supabase) {}
 
+  /** Retires journal rows left open by a process interruption before startup. */
+  public async recoverInterruptedExecutions(cutoffIso: string): Promise<{
+    events: number;
+    turns: number;
+    tools: number;
+  }> {
+    const completedAt = clockService.now().toISO();
+    const reason = "interrupted_before_completion";
+    const [tools, turns, events] = await Promise.all([
+      this.client
+        .from(AGENT_TABLES.toolExecutions)
+        .update({ status: "error", error: reason, completed_at: completedAt })
+        .eq("status", "running")
+        .lte("started_at", cutoffIso)
+        .select("id"),
+      this.client
+        .from(AGENT_TABLES.turns)
+        .update({ status: "failed", completed_at: completedAt })
+        .eq("status", "running")
+        .lte("started_at", cutoffIso)
+        .select("id"),
+      this.client
+        .from(AGENT_TABLES.events)
+        .update({ status: "failed", error: reason, completed_at: completedAt })
+        .eq("status", "running")
+        .lte("received_at", cutoffIso)
+        .select("id"),
+    ]);
+    if (tools.error) throw new Error(`Could not recover interrupted tool executions: ${tools.error.message}`);
+    if (turns.error) throw new Error(`Could not recover interrupted agent turns: ${turns.error.message}`);
+    if (events.error) throw new Error(`Could not recover interrupted agent events: ${events.error.message}`);
+    return {
+      tools: tools.data?.length ?? 0,
+      turns: turns.data?.length ?? 0,
+      events: events.data?.length ?? 0,
+    };
+  }
+
   public async beginEvent(event: AgentEvent, actorMemberId?: string): Promise<{ eventId: string; duplicateResult?: AgentTurnResult }> {
     const { data: existing, error: existingError } = await this.client
       .from(AGENT_TABLES.events)
