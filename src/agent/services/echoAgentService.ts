@@ -12,6 +12,10 @@ import type { EchoAgentExecutor } from "../runtime/agentExecutor.js";
 import type { AgentApprovalCoordinator } from "./approvalCoordinator.js";
 import type { ScheduledAgentTaskService } from "./scheduledAgentTaskService.js";
 
+const INITIAL_RECURRING_TASK_MESSAGE =
+  "Your recurring reminder has been created.\n\n"
+  + "Future messages may look like this, using fresh information available at execution time:\n\n";
+
 /** Application-facing entrypoint shared by transport messages and scheduled events. */
 export class EchoAgentService {
   private activeTransport?: AgentMessageTransport;
@@ -108,7 +112,8 @@ export class EchoAgentService {
       payload: { transport: this.defaultTransportId, ...input.payload },
       actorMemberId: input.actorMemberId,
     };
-    const result = await this.executor.execute(event);
+    const executionResult = await this.executor.execute(event);
+    const result = frameInitialRecurringTaskResult(event, executionResult);
     if (result.replayed) {
       return {
         ...result,
@@ -181,6 +186,20 @@ export class EchoAgentService {
     if (typeof obligationId !== "string" || !this.obligations) return;
     await this.obligations.updateStatus(obligationId, status, reason);
   }
+}
+
+/** Labels the real first execution without changing the task's reusable objective. */
+function frameInitialRecurringTaskResult(event: AgentEvent, result: AgentTurnResult): AgentTurnResult {
+  if (event.type !== "scheduled_agent_task_due" || event.payload.immediate !== true || !result.reply?.text.trim()) {
+    return result;
+  }
+  return {
+    ...result,
+    reply: {
+      ...result.reply,
+      text: `${INITIAL_RECURRING_TASK_MESSAGE}${result.reply.text}`,
+    },
+  };
 }
 
 function deliveryReason(input: {

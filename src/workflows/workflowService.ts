@@ -241,6 +241,10 @@ export class WorkflowService {
     action: "confirm" | "decline" | "edit" | "request_cancel",
     edit: { rawDatePhrase?: string | null; reminderMessage?: string | null },
   ): Promise<OutgoingMessage | null> {
+    // Once scheduled, the original confirmation remains a stable pointer for
+    // cancellation. Other actions must not silently reopen a completed flow.
+    if (reminder.status === "scheduled" && action !== "request_cancel") return null;
+
     if (reminder.status === "pending_cancel_confirmation") {
       if (action !== "confirm") return null;
       this.scheduler.cancel(reminder.id);

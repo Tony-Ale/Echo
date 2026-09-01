@@ -13,6 +13,8 @@ import type { AgentPlannerInput } from "../agent/types.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import { applyWhatsAppConversationPolicy } from "../integrations/whatsapp/conversationPolicy.js";
 import { isEchoMentioned } from "../integrations/whatsapp/messageUtils.js";
+import { echoCapabilityRegistry } from "../deployments/echo/capabilities.js";
+import { buildHelpMessage } from "../app/helpText.js";
 
 const ECHO_DEPLOYMENT_PROFILE = createEchoDeploymentProfile();
 
@@ -21,6 +23,7 @@ async function run(): Promise<void> {
   await testPluginDependencyOrdering();
   await testPluginValidation();
   testPromptComposition();
+  testCapabilityRegistry();
   testDeploymentProfile();
   testWhatsAppConversationPolicy();
   console.log("Framework contract self-tests passed.");
@@ -160,12 +163,34 @@ function testPromptComposition(): void {
   assert.ok(composed.indexOf("<runtime:runtime.tools.core>") < composed.indexOf("<domain:domain.choir.operations>"));
   assert.match(composed, /You are Echo/);
   assert.match(composed, /easy to scan/);
+  assert.match(composed, /inspect_agent_capabilities/);
+  assert.match(composed, /internal tool names are implementation details/i);
   const resolvePrompt = createDynamicPromptResolver(prompts, ECHO_DEPLOYMENT_PROFILE.promptPackIds);
   const casualPrompt = resolvePrompt(promptInput("transport", "message_received"));
   const scheduledPrompt = resolvePrompt(promptInput("scheduler", "weekly_rota_reminder_due"));
   assert.doesNotMatch(casualPrompt, /weekly_rota_reminder_due/);
   assert.match(scheduledPrompt, /weekly_rota_reminder_due/);
   assert.throws(() => prompts.register(AGENT_CANON_PROMPT_PACK), /already registered/);
+}
+
+function testCapabilityRegistry(): void {
+  const memberIds = echoCapabilityRegistry.listForRoles(["member"]).map(({ id }) => id);
+  assert.ok(memberIds.includes("choir_knowledge"));
+  assert.ok(memberIds.includes("one_time_reminders"));
+  assert.equal(memberIds.includes("recurring_agent_tasks"), false);
+  assert.equal(memberIds.includes("application_clock"), false);
+
+  const superuserIds = echoCapabilityRegistry.listForRoles(["member", "superuser"]).map(({ id }) => id);
+  assert.ok(superuserIds.includes("recurring_agent_tasks"));
+  assert.ok(superuserIds.includes("schedule_visibility"));
+  assert.equal(superuserIds.includes("application_clock"), false);
+
+  const creatorIds = echoCapabilityRegistry.listForRoles(["member", "superuser", "creator"]).map(({ id }) => id);
+  assert.ok(creatorIds.includes("application_clock"));
+  assert.ok(creatorIds.includes("manual_sunday_reminder"));
+
+  assert.doesNotMatch(buildHelpMessage(["member"]), /creator-only `clock`/i);
+  assert.match(buildHelpMessage(["member", "superuser", "creator"]), /creator-only `clock`/i);
 }
 
 function promptInput(source: "transport" | "scheduler", type: string): AgentPlannerInput {

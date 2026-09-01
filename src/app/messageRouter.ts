@@ -68,7 +68,8 @@ export class MessageRouter {
     }
 
     if (isHelpCommand(message.text)) {
-      const text = buildHelpMessage();
+      const member = await this.identities.resolveSender(message.sender);
+      const text = buildHelpMessage(member?.roles ?? ["member"]);
       return this.recordDirectReply(message, { text });
     }
 

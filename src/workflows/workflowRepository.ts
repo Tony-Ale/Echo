@@ -83,7 +83,7 @@ export class WorkflowRepository {
       .from("echo_reminders")
       .select("*")
       .eq("confirmation_message_id", confirmationMessageId)
-      .in("status", ["pending_confirmation", "pending_edit_confirmation", "pending_cancel_confirmation"])
+      .in("status", ["pending_confirmation", "pending_edit_confirmation", "pending_cancel_confirmation", "scheduled"])
       .maybeSingle();
     if (error || !data) return null;
     return fromReminderRow(data as ReminderRow);

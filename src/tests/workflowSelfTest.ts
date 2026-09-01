@@ -286,6 +286,29 @@ async function run(): Promise<void> {
   assert.equal(repository.reminders[0].status, "scheduled");
   assert.deepEqual(scheduler.scheduled, ["r-1"]);
 
+  const scheduledCancelPrompt = await service.continueReminder({
+    action: "request_cancel",
+    message: { ...baseMessage, text: "cancel reminder", quotedMessage: editReplyContext },
+  });
+  assert.match(scheduledCancelPrompt.text, /Reply YES to confirm/);
+  assert.equal(repository.reminders[0].status, "pending_cancel_confirmation");
+  await service.registerConfirmationMessage({
+    ...workflowConfirmation(scheduledCancelPrompt)!,
+    confirmationMessageId: "confirm-scheduled-cancel",
+  });
+  const scheduledCancelled = await service.continueReminder({
+    action: "confirm",
+    message: {
+      ...baseMessage,
+      text: "YES",
+      quotedMessage: { ...replyContext, id: "confirm-scheduled-cancel" },
+    },
+  });
+  assert.equal(scheduledCancelled.text, "Cancelled. I will not send that reminder.");
+  assert.equal(repository.reminders[0].status, "cancelled");
+  assert.deepEqual(scheduler.cancelled, ["r-1"]);
+  scheduler.cancelled = [];
+
   repository.reminders[0].status = "pending_confirmation";
   repository.reminders[0].scheduledFor = DateTime.fromISO("2026-08-22T09:00:00", { zone: "Europe/London" }).toISO()!;
   repository.reminders[0].message = "Choir rehearsal starts by 5pm";

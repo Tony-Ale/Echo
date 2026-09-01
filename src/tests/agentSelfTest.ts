@@ -35,6 +35,7 @@ import { formatScheduledJobsForWhatsApp, MessageRouter } from "../app/messageRou
 import type { ScheduledJobInfo } from "../integrations/scheduler/jobScheduler.js";
 import {
   isSetlistLeadershipRole,
+  ModelWeeklyScheduleAssessor,
   normalizeScheduleAssessment,
   RotaReminderService,
   type WeeklyScheduleAssessor,
@@ -44,6 +45,7 @@ import { agentConfig } from "../config/agentConfig.js";
 import { isFutureScheduleDate } from "../app/scheduleVisibility.js";
 import { SupabaseAgentJournal } from "../agent/persistence/operationsRepository.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { echoCapabilityRegistry } from "../deployments/echo/capabilities.js";
 
 const CHAT_ID = "choir@g.us";
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -80,6 +82,8 @@ async function run(): Promise<void> {
     await testAtomicToolCompletesWithoutReplanning();
     await testNonTerminalToolPreservesAgenticLoop();
     await testConstrainedGenericSpreadsheetEvaluation();
+    await testWeeklySchedulePreservesCompleteEvidence();
+    await testRotaAssessmentPreservesCompleteEvidence();
     await testUnknownSpreadsheetColumnCanBeRepaired();
     await testAggregateQueryBroadensBeforeClaimingAbsence();
     await testValidatedNextToolAvoidsPlannerRoundTrip();
@@ -112,6 +116,7 @@ async function run(): Promise<void> {
     await testPlannerDoesNotExposeProtocolFailures();
     await testPlannerCanRequestDiscoverableHiddenTool();
     await testPlannerOmitsMissingOptionalProfile();
+    await testPlannerPreservesCompleteToolResults();
     await testPlannerAcceptsVerifiedDeferral();
     await testBoundedMemberMemory();
     await testPlannerOnboardsUnknownChoirMember();
@@ -527,6 +532,53 @@ async function testPlannerOmitsMissingOptionalProfile(): Promise<void> {
   const payload = JSON.parse(serializedInput) as { currentContext: Record<string, unknown> };
   assert.equal(Object.hasOwn(payload.currentContext, "memberProfile"), false);
   assert.equal((payload.currentContext.actor as { id?: string })?.id, MEMBER_ID);
+}
+
+async function testPlannerPreservesCompleteToolResults(): Promise<void> {
+  let serializedInput = "";
+  const marker = "TAIL_RECORD_MUST_REMAIN_VISIBLE";
+  const model = {
+    withStructuredOutput() {
+      return {
+        async invoke(messages: Array<{ content: unknown }>) {
+          serializedInput = String(messages.at(-1)?.content ?? "");
+          return {
+            kind: "respond",
+            message: "Complete evidence received.",
+            reason: "The requested record is present in the tool result.",
+            plan: [],
+            toolName: "",
+            inputJson: "{}",
+          };
+        },
+      };
+    },
+    role: "planner",
+    modelName: "test-model",
+  } as unknown as ConfiguredChatModel;
+  const planner = new LangChainAgentPlanner(model, "test-model", "Test system prompt");
+  const input = plannerInput();
+  input.previousSteps.push({
+    step: 0,
+    decision: {
+      kind: "tool",
+      toolName: "retrieve_choir_knowledge",
+      input: { query: "complete evidence" },
+      reason: "Read the source.",
+    },
+    result: {
+      status: "success",
+      summary: "Complete source returned.",
+      data: { evidence: `${"x".repeat(30_000)}${marker}` },
+    },
+  });
+
+  await planner.decide(input, new AbortController().signal);
+
+  const payload = JSON.parse(serializedInput) as {
+    completedSteps: Array<{ result?: { data?: { evidence?: string } } }>;
+  };
+  assert.equal(payload.completedSteps[0]?.result?.data?.evidence?.endsWith(marker), true);
 }
 
 async function testPlannerUnwrapsNestedDecisionInput(): Promise<void> {
@@ -1087,6 +1139,66 @@ async function testCachedWeeklyInterpretationOmitsBulkyEvidence(): Promise<void>
     payload: { weekStart: "2026-08-10", allowUntargetedMessage: true },
   });
   assert.equal(result.status, "completed");
+}
+
+async function testWeeklySchedulePreservesCompleteEvidence(): Promise<void> {
+  const marker = "WEEKLY_EVIDENCE_TAIL";
+  const planner = new ScriptedAgentPlanner((input) => {
+    if (input.previousSteps.length === 0) return {
+      kind: "tool",
+      toolName: "read_week_schedule",
+      input: { weekStart: "2026-08-10" },
+      reason: "Load the complete weekly evidence.",
+    };
+    const data = input.previousSteps[0]?.result?.data as { scheduleContext?: string };
+    assert.equal(data.scheduleContext?.endsWith(marker), true);
+    return { kind: "respond", message: "Complete week loaded.", reason: "The tail record is present." };
+  });
+  const runtime = createRuntime(planner, null, {
+    knowledgeContext: `${"x".repeat(10_000)}${marker}`,
+  });
+
+  const result = await runtime.service.handleScheduledWake({
+    eventKey: "scheduler:complete-week-evidence",
+    type: "setlist_weekly_planning_due",
+    chatId: CHAT_ID,
+    payload: { weekStart: "2026-08-10", allowUntargetedMessage: true },
+  });
+
+  assert.equal(result.status, "completed");
+}
+
+async function testRotaAssessmentPreservesCompleteEvidence(): Promise<void> {
+  const marker = "ROTA_ASSESSMENT_TAIL";
+  let serializedInput = "";
+  const model = {
+    withStructuredOutput() {
+      return {
+        async invoke(messages: Array<{ content: unknown }>) {
+          serializedInput = String(messages.at(-1)?.content ?? "");
+          return {
+            sundayActivityCancelled: false,
+            setlistRequired: true,
+            summary: "The dated Sunday activity is present.",
+            ambiguities: [],
+          };
+        },
+      };
+    },
+    role: "planner",
+    modelName: "test-model",
+  } as unknown as ConfiguredChatModel;
+  const assessor = new ModelWeeklyScheduleAssessor(model);
+
+  await assessor.assess({
+    weekStart: "2026-08-10",
+    weekEnd: "2026-08-16",
+    evidence: `${"x".repeat(13_000)}${marker}`,
+    signal: new AbortController().signal,
+  });
+
+  const payload = JSON.parse(serializedInput) as { evidence?: string };
+  assert.equal(payload.evidence?.endsWith(marker), true);
 }
 
 async function testSchedulerTargetedDelivery(): Promise<void> {
@@ -2289,6 +2401,7 @@ async function testCapabilityCatalogActivation(): Promise<void> {
     { setlistOperations },
   );
   const advertisedToolFields: Record<string, string[]> = {
+    inspect_agent_capabilities: [],
     onboard_current_sender: [],
     update_own_member_profile: ["aliases", "preferredDisplayName"],
     set_member_canonical_name: ["canonicalName", "confirmed", "memberId"],
@@ -2591,6 +2704,8 @@ async function testBoundedMemberMemory(): Promise<void> {
 
 async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
   const expectedTools = ["get_current_time", "inspect_spreadsheet", "query_spreadsheet"];
+  const tailMarker = "ATTENDANCE_TAIL_RECORD";
+  const completeAttendanceCell = `${"x".repeat(1_500)}${tailMarker}`;
   const planner = new ScriptedAgentPlanner((input) => {
     assert.deepEqual(input.toolCatalog.map((tool) => tool.name).sort(), [...expectedTools].sort());
     if (input.previousSteps.length === 0) {
@@ -2608,6 +2723,8 @@ async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
       const inspection = input.previousSteps[1]?.result?.data as Record<string, unknown>;
       assert.equal(inspection.sampleIsPartial, true);
       assert.deepEqual(inspection.columns, ["description", "attendance"]);
+      const sampleRows = inspection.sampleRows as Array<{ attendance?: string }>;
+      assert.equal(sampleRows[0]?.attendance?.endsWith(tailMarker), true);
       return {
         kind: "tool",
         toolName: "query_spreadsheet",
@@ -2620,7 +2737,9 @@ async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
         reason: "Query the discovered multiline attendance column.",
       };
     }
-    return { kind: "respond", message: "Member A was unavailable.", reason: "The bounded row answers the request." };
+    const queryResult = input.previousSteps[2]?.result?.data as { rows?: Array<{ attendance?: string }> };
+    assert.equal(queryResult.rows?.[0]?.attendance?.endsWith(tailMarker), true);
+    return { kind: "respond", message: "Member A was unavailable.", reason: "The complete row answers the request." };
   });
   const runtime = createRuntime(planner, {
     id: CREATOR_ID,
@@ -2636,7 +2755,7 @@ async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
           sheetName,
           columns: ["description", "attendance"],
           rowCount: 12,
-          sampleRows: [{ description: "January", attendance: "03-January-26 -> Member A: A" }],
+          sampleRows: [{ description: "January", attendance: completeAttendanceCell }],
         };
       },
       async querySheet(input) {
@@ -2644,7 +2763,7 @@ async function testConstrainedGenericSpreadsheetEvaluation(): Promise<void> {
         assert.equal(input.filters.length, 1, "Locate the multiline record before interpreting values within it.");
         return {
           sheetName: input.sheetName,
-          rows: [{ description: "August", attendance: "10-August-26 -> Member A: NA" }],
+          rows: [{ description: "August", attendance: completeAttendanceCell }],
           matchedRows: 1,
           truncated: false,
         };
@@ -2829,6 +2948,7 @@ function createRuntime(
   const weeklyInterpretations = options.weeklyInterpretations ?? new InMemoryWeeklyInterpretationRepository();
   const workflows = options.workflows ?? workflowStub();
   const tools = new AgentToolRegistry(createCoreAgentTools({
+    capabilities: echoCapabilityRegistry,
     identities,
     memory,
     obligations,

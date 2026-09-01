@@ -325,7 +325,7 @@ function formatPlannerInput(input: AgentPlannerInput): string {
       },
       availableTools: input.toolCatalog,
       availableCapabilities: input.availableCapabilities,
-      completedSteps: input.previousSteps.map(compactPlannerStep),
+      completedSteps: input.previousSteps.map(projectPlannerStep),
       limits: { maxSteps: input.maxSteps, remainingSteps: input.maxSteps - input.previousSteps.length },
     };
   const serialized = JSON.stringify(payload);
@@ -340,10 +340,7 @@ function formatPlannerInput(input: AgentPlannerInput): string {
           ),
           memoryDirectory: payload.currentContext.memoryDirectory.slice(0, AGENT_CONTEXT_LIMITS.compactedMemoryDirectoryEntries),
         },
-        completedSteps: payload.completedSteps.map((step) => ({
-          ...step,
-          result: step.result ? { ...step.result, data: compactToolData(step.result.data, AGENT_CONTEXT_LIMITS.compactedToolResultCharacters) } : undefined,
-        })),
+        completedSteps: payload.completedSteps,
         contextPressure: {
           compacted: true,
           originalCharacters: serialized.length,
@@ -358,37 +355,16 @@ function plannerSafeEventPayload(payload: Record<string, unknown>): Record<strin
   return safe;
 }
 
-// Keep enough room for the system prompt, structured schema and later planning
-// steps regardless of the configured provider's context window.
-function compactPlannerStep(step: AgentPlannerInput["previousSteps"][number]) {
+// Replies are transport output rather than planning evidence. Tool data remains
+// structured and complete so later planning cannot lose records from its tail.
+function projectPlannerStep(step: AgentPlannerInput["previousSteps"][number]) {
   if (!step.result) return step;
   return {
     ...step,
     result: {
       ...step.result,
       reply: undefined,
-      data: compactToolData(step.result.data, AGENT_CONTEXT_LIMITS.compactedToolResultCharacters),
+      data: step.result.data,
     },
-  };
-}
-
-function compactToolData(value: unknown, characterLimit: number): unknown {
-  if (value === undefined) return undefined;
-  const serialized = JSON.stringify(value);
-  if (serialized.length <= characterLimit) return value;
-  const record = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-  return {
-    truncated: true,
-    originalCharacters: serialized.length,
-    preview: serialized.slice(0, characterLimit),
-    ...(record?.evidenceQuality ? { evidenceQuality: record.evidenceQuality } : {}),
-    ...(record?.provenance ? { provenance: record.provenance } : {}),
-    ...(record?.retrievalProvenance ? { retrievalProvenance: record.retrievalProvenance } : {}),
-    ...(typeof record?.nextOffset === "number" ? { nextOffset: record.nextOffset } : {}),
-    ...(typeof record?.coverage === "string" ? { coverage: record.coverage } : {}),
-    ...(typeof record?.sourceId === "string" ? { sourceId: record.sourceId } : {}),
-    ...(typeof record?.sourceName === "string" ? { sourceName: record.sourceName } : {}),
   };
 }

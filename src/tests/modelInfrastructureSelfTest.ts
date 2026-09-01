@@ -52,12 +52,10 @@ planning:
   planItemTokens: 75
   maximumParallelContextRequests: 3
 reusableProcedures: { maximumSteps: 12, inputTokensPerStep: 1000 }
-toolResults: { retainedTokens: 2000, compactedTokens: 1000 }
 retrieval:
   structuredEvidenceTokens: 1750
   semanticEvidenceTokens: 750
   fieldTokens: 375
-  weeklyEvidenceTokens: 2000
   spreadsheetMaximumPageSize: 100
   semanticDefaultResults: 5
   semanticMaximumResults: 12

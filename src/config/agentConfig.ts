@@ -59,18 +59,10 @@ const agentConfigurationSchema = z.object({
     maximumSteps: z.number().int().positive(),
     inputTokensPerStep: tokenBudget,
   }),
-  toolResults: z.object({
-    retainedTokens: tokenBudget,
-    compactedTokens: tokenBudget,
-  }).refine(
-    (value) => value.compactedTokens <= value.retainedTokens,
-    "toolResults.compactedTokens must not exceed toolResults.retainedTokens",
-  ),
   retrieval: z.object({
     structuredEvidenceTokens: tokenBudget,
     semanticEvidenceTokens: tokenBudget,
     fieldTokens: tokenBudget,
-    weeklyEvidenceTokens: tokenBudget,
     spreadsheetMaximumPageSize: z.number().int().min(1).max(500),
     semanticDefaultResults: z.number().int().min(1).max(50),
     semanticMaximumResults: z.number().int().min(1).max(50),

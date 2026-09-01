@@ -22,9 +22,6 @@ export const AGENT_CONTEXT_LIMITS = {
   structuredEvidenceCharacters: approximateTokensToCharacters(agentConfig.retrieval.structuredEvidenceTokens),
   semanticEvidenceCharacters: approximateTokensToCharacters(agentConfig.retrieval.semanticEvidenceTokens),
   evidenceFieldCharacters: approximateTokensToCharacters(agentConfig.retrieval.fieldTokens),
-  weeklyEvidenceCharacters: approximateTokensToCharacters(agentConfig.retrieval.weeklyEvidenceTokens),
-  retainedToolResultCharacters: approximateTokensToCharacters(agentConfig.toolResults.retainedTokens),
-  compactedToolResultCharacters: approximateTokensToCharacters(agentConfig.toolResults.compactedTokens),
   recentConversationCharacters: approximateTokensToCharacters(
     agentConfig.context.recentConversation.tokensPerMessage,
   ),

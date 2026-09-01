@@ -14,7 +14,6 @@ import { clockService } from "../../../shared/clockService.js";
 import { sha256 } from "../../../shared/utils/hash.js";
 
 const LONDON_ZONE = "Europe/London";
-const MAX_ASSESSMENT_EVIDENCE_CHARACTERS = 12_000;
 
 const scheduleAssessmentSchema = z.object({
   sundayActivityCancelled: z.boolean().nullable(),
@@ -83,7 +82,7 @@ export class ModelWeeklyScheduleAssessor implements WeeklyScheduleAssessor {
       ].join(" ")),
       new HumanMessage(JSON.stringify({
         targetWindow: { start: input.weekStart, end: input.weekEnd, inclusive: true },
-        evidence: input.evidence.slice(0, MAX_ASSESSMENT_EVIDENCE_CHARACTERS),
+        evidence: input.evidence,
       })),
     ], { signal: input.signal });
     return normalizeScheduleAssessment(assessment);

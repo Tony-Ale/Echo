@@ -1,27 +1,12 @@
-export function buildHelpMessage(): string {
-  return [
-    "Echo can help with:",
-    "",
-    "- Answering choir, rota, song, event, and resource questions.",
-    "",
-    "- Replying with quoted-message context when you quote or reply to a message.",
-    "",
-    "- Learning member names and useful, non-sensitive preferences over time.",
-    "",
-    "- Creating reminders: `@Echo remind me next Thursday about rehearsal`.",
-    "",
-    "- Creating quoted reminders: reply to a message with `@Echo remind me tomorrow`.",
-    "",
-    "- Creating recurring agent tasks with `remind` (superusers), with the first result sent immediately.",
-    "",
-    "- Editing/cancelling reminders by replying to Echo's confirmation message.",
-    "",
-    "- Submitting or correcting combined or separate setlists with `#submit_setlist`.",
-    "",
-    "- Nudging the assigned leader for missing worship/praise setlists.",
-    "",
-    "- Sending weekly rota reminders and setlist reminders automatically.",
-    "",
-    "One-time reminders require confirmation. Reply `YES` to confirm or `EDIT ...` to change reminder details.",
-  ].join("\n");
+import type { MemberRole } from "../agent/types.js";
+import { echoCapabilityRegistry } from "../deployments/echo/capabilities.js";
+
+export function buildHelpMessage(roles: readonly MemberRole[] = ["member"]): string {
+  const lines = ["Echo can help with:", ""];
+  for (const capability of echoCapabilityRegistry.listForRoles(roles)) {
+    if (!capability.helpText) continue;
+    lines.push(`- ${capability.helpText}`, "");
+  }
+  lines.push("One-time reminder creation, edits, and cancellation require confirmation through Echo's reply chain.");
+  return lines.join("\n");
 }

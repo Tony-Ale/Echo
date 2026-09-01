@@ -23,7 +23,7 @@ import type {
   WeeklyInterpretationRepository,
   ChoirWorkflowService,
 } from "../ports.js";
-import type { AgentTool } from "../types.js";
+import type { AgentTool, MemberRole } from "../types.js";
 import { getMondayOfWeek } from "../../domains/choir/intelligence/helpers.js";
 import { isExplicitReminderActivation, parseReminderReplyAction } from "../../workflows/workflowDetection.js";
 import { describeRecurringSchedule } from "../services/recurringSchedule.js";
@@ -32,8 +32,10 @@ import type {
   SetlistOperationResult,
   SetlistOperationsService,
 } from "../../domains/choir/operations/setlistOperationsService.js";
+import type { CapabilityRegistry } from "../../framework/capabilities/capabilityRegistry.js";
 
 export interface CoreToolDependencies {
+  capabilities: CapabilityRegistry;
   identities: IdentityRepository;
   memory: MemoryRepository;
   obligations: ObligationRepository;
@@ -61,6 +63,7 @@ export function createCoreAgentTools(dependencies: CoreToolDependencies): AgentT
 export function createPlatformAgentTools(dependencies: CoreToolDependencies): AgentTool[] {
   return [
     currentTimeTool(),
+    inspectAgentCapabilitiesTool(dependencies.capabilities),
     searchConversationHistoryTool(dependencies.conversations),
     readMemberMemoryTool(dependencies.memory),
     readContextMemoryTool(dependencies.memory),
@@ -81,6 +84,37 @@ export function createPlatformAgentTools(dependencies: CoreToolDependencies): Ag
     inspectSpreadsheetTool(dependencies.spreadsheets),
     querySpreadsheetTool(dependencies.spreadsheets),
   ];
+}
+
+function inspectAgentCapabilitiesTool(capabilities: CapabilityRegistry): AgentTool {
+  const schema = z.object({}).describe("{}");
+  return {
+    name: "inspect_agent_capabilities",
+    description: "Read the authoritative, role-aware guide to what this agent can do and how the current member can use it. Use for questions about capabilities, commands, access, examples or feature instructions. This tool explains features but never executes them.",
+    capability: "conversation",
+    schema,
+    sideEffect: "read",
+    async execute(_input, context) {
+      const roles: readonly MemberRole[] = context.actor?.roles ?? ["member"];
+      const available = capabilities.listForRoles(roles);
+      return {
+        status: "success",
+        summary: `${available.length} capabilities available to the current member.`,
+        data: {
+          currentRoles: roles,
+          capabilities: available.map(({ id, title, summary, kind, minimumRole, examples, notes }) => ({
+            id,
+            title,
+            summary,
+            kind,
+            minimumRole,
+            examples,
+            notes: notes ?? [],
+          })),
+        },
+      };
+    },
+  };
 }
 
 function listKnowledgeSourcesTool(spreadsheets: SpreadsheetDataService): AgentTool {
@@ -126,7 +160,6 @@ function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool
           ...result,
           sampledRowCount: result.sampleRows.length,
           sampleIsPartial: result.sampleRows.length < result.rowCount,
-          sampleRows: result.sampleRows.map(boundSpreadsheetRow),
         },
       };
     },
@@ -191,7 +224,6 @@ function querySpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
           : `${result.matchedRows} spreadsheet row(s) matched the deterministic query.`,
         data: {
           ...result,
-          rows: result.rows.map(boundSpreadsheetRow),
           ...(needsBroaderRecordCheck ? { needsBroaderRecordCheck: true } : {}),
         },
       };
@@ -213,10 +245,6 @@ function hasRepeatedContainsFilters(
     countByColumn.set(column, (countByColumn.get(column) ?? 0) + 1);
   }
   return [...countByColumn.values()].some((count) => count > 1);
-}
-
-function boundSpreadsheetRow(row: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value.slice(0, 1_000)]));
 }
 
 function createScheduledAgentTaskTool(tasks: ScheduledAgentTaskManager): AgentTool {
@@ -283,7 +311,7 @@ function listScheduledAgentTasksTool(tasks: ScheduledAgentTaskManager): AgentToo
   const schema = z.object({}).describe("{}");
   return {
     name: "list_scheduled_agent_tasks",
-    description: "List the current member's active and paused recurring agent tasks in this conversation.",
+    description: "List only the current member's active and paused recurring agent tasks in this conversation. It cannot inspect tasks owned by another member, including for creators or superusers.",
     capability: "workflow",
     schema,
     sideEffect: "read",
@@ -295,7 +323,9 @@ function listScheduledAgentTasksTool(tasks: ScheduledAgentTaskManager): AgentToo
       const values = await tasks.listOwned(context.actor.id, context.event.chatId);
       return {
         status: "success",
-        summary: values.length ? `${values.length} recurring task(s) loaded.` : "No recurring tasks are active or paused.",
+        summary: values.length
+          ? `${values.length} recurring task(s) loaded.`
+          : "The current member owns no active or paused recurring tasks; another member's tasks are inaccessible.",
         data: values.map((task) => ({
           id: task.id,
           objective: task.objective,
@@ -326,7 +356,7 @@ function manageScheduledAgentTaskTool(tasks: ScheduledAgentTaskManager): AgentTo
   }));
   return {
     name: "manage_scheduled_agent_task",
-    description: "Pause, resume, cancel or update one of the current member's recurring agent tasks. Backend ownership is authoritative.",
+    description: "Pause, resume, cancel or update one of the current member's recurring agent tasks. It cannot manage another member's task; backend ownership is authoritative.",
     capability: "workflow",
     schema,
     sideEffect: "write",
@@ -888,7 +918,7 @@ function readWeekScheduleTool(
         `Target service window: Monday ${weekStart} through Sunday ${weekEnd}, inclusive.`,
         "Every retained dated assignment falls inside this target window. Source section labels such as 'Week of' are grouping metadata and do not move an ending-Sunday assignment into another service week.",
         result.context,
-      ].join("\n\n").slice(0, AGENT_CONTEXT_LIMITS.weeklyEvidenceCharacters);
+      ].join("\n\n");
       return {
         status: "success",
         summary: cached

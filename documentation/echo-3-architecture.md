@@ -35,6 +35,7 @@ flowchart TD
 - **Events are idempotent.** WhatsApp message IDs and scheduler occurrence keys prevent duplicate processing after retries.
 - **Context is bounded.** Each transport turn starts with up to five recent messages, identity, a compact member profile only when relevant and a metadata-only memory directory. Facts, block values, older history and obligations are loaded only through bounded tools. Scheduled activations do not load chat history by default.
 - **Tools are capability-scoped.** The planner receives only relevant capability groups and can explicitly activate another group when needed.
+- **Capabilities have one public registry.** Role-aware help text and the read-only capability-inspection tool use the same Echo deployment catalogue, so guidance stays aligned with implemented features without loading the whole catalogue into every prompt.
 - **The runtime is transport-neutral.** WhatsApp-specific message shapes are converted at the application edge.
 - **Deployments are composable.** A profile selects typed plugins, prompt packs, model names and a transport adapter.
 

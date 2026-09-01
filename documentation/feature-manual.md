@@ -8,6 +8,7 @@ Echo is the WhatsApp assistant for the OHA choir group. Tag Echo in the group, o
 - Reply directly to an Echo message.
 - Quote another message when you want Echo to use that message as context.
 - Use `@Echo help` to see a short help summary in WhatsApp.
+- Ask Echo what it can do or how to use a feature. Echo reads its role-aware capability guide and explains only the features available to you.
 
 ## Questions Echo Can Answer
 
@@ -45,7 +46,7 @@ Echo is the WhatsApp assistant for the OHA choir group. Tag Echo in the group, o
 - Superusers can use the same `remind` command to schedule a recurring objective:
   - `@Echo remind the group every Monday at 10am with the current operations update`
 - Recurrence must clearly state a daily, weekly, or monthly schedule and a time.
-- Echo saves the objective, sends its first real result immediately, and runs it again on schedule without a preview or `YES` confirmation.
+- Echo saves the objective, sends its first real result immediately under a short note explaining that future messages may look like it, and runs it again on schedule without a preview or `YES` confirmation.
 - Future runs return to the group where the task was created and retrieve fresh information when the objective requires it.
 - A saved procedure contains successful non-mutating tool calls, not previous sheet rows or message results. Echo can revise it when current data changes.
 - Privileged scheduled objectives may inspect and query a specifically named spreadsheet tab with bounded columns and deterministic filters.

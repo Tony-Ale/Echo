@@ -7,7 +7,6 @@ import type { AgentActivityEvent, AgentDecision, AgentEvent, AgentPlanner, Agent
 import { sanitizeActivityInput, sanitizeActivityText } from "./activitySanitizer.js";
 import { AgentToolRegistry } from "./toolRegistry.js";
 import { performance } from "node:perf_hooks";
-import { AGENT_CONTEXT_LIMITS } from "./contextLimits.js";
 import type { AgentRuntimeTelemetry } from "./runtimeTelemetry.js";
 import { agentConfig } from "../../config/agentConfig.js";
 
@@ -490,9 +489,9 @@ function describeContext(context: import("../types.js").AgentTurnContext): strin
 const RETAINED_RESULT_STEPS = 2;
 
 /**
- * Keep the complete audit trail in `steps`, but expose only recent bounded tool
- * evidence to the model. This mirrors Letta-style durable history versus the
- * active context window without destroying any persisted result.
+ * Keep the complete audit trail in `steps`, while exposing complete data from
+ * the most recent results to the model. Older results remain in the audit trail
+ * and their summaries still preserve the sequence of work.
  */
 function projectStepsForPlanner(steps: AgentStep[]): AgentStep[] {
   const firstRetained = Math.max(0, steps.length - RETAINED_RESULT_STEPS);
@@ -503,28 +502,11 @@ function projectStepsForPlanner(steps: AgentStep[]): AgentStep[] {
       ...step,
       result: {
         ...step.result,
-        data: retainData ? boundToolData(step.result.data) : undefined,
+        data: retainData ? step.result.data : undefined,
         reply: undefined,
       },
     };
   });
-}
-
-function boundToolData(value: unknown): unknown {
-  if (value === undefined) return undefined;
-  const serialized = JSON.stringify(value);
-  if (serialized.length <= AGENT_CONTEXT_LIMITS.retainedToolResultCharacters) return value;
-  const record = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-  return {
-    truncated: true,
-    originalCharacters: serialized.length,
-    preview: serialized.slice(0, AGENT_CONTEXT_LIMITS.retainedToolResultCharacters),
-    ...(record?.evidenceQuality ? { evidenceQuality: record.evidenceQuality } : {}),
-    ...(record?.provenance ? { provenance: record.provenance } : {}),
-    ...(record?.retrievalProvenance ? { retrievalProvenance: record.retrievalProvenance } : {}),
-  };
 }
 
 function readableName(value: string): string {

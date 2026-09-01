@@ -197,7 +197,7 @@ export class AgentToolRegistry {
       if (step.decision.kind !== "tool" || step.result?.status !== "success") return [];
       const tool = this.tools.get(step.decision.toolName);
       if (!tool || !["none", "read"].includes(tool.sideEffect)) return [];
-      if (["activate_capability", "get_current_time"].includes(tool.name)) return [];
+      if (["activate_capability", "get_current_time", "inspect_agent_capabilities"].includes(tool.name)) return [];
       const serialized = JSON.stringify(step.decision.input);
       if (serialized.length > AGENT_CONTEXT_LIMITS.reusableProcedureInputCharacters) return [];
       return [{ toolName: tool.name, input: step.decision.input }];

@@ -166,11 +166,25 @@ async function testImmediateActivationUsesAgentTransport(): Promise<void> {
   const reply = await service.handleMessage(incoming);
   assert.equal(reply, null, "the first result is delivered by the scheduled activation and must not be returned twice");
   assert.equal(transport.sent.length, 1);
-  assert.equal(transport.sent[0].reply.text, "Current operations update");
+  assert.equal(
+    transport.sent[0].reply.text,
+    "Your recurring reminder has been created.\n\n"
+      + "Future messages may look like this, using fresh information available at execution time:\n\n"
+      + "Current operations update",
+  );
   assert.equal(repository.tasks.length, 1);
   const duplicateReply = await service.handleMessage(incoming);
   assert.equal(duplicateReply, null);
   assert.equal(transport.sent.length, 1, "a retried creation event must not deliver the immediate run twice");
+
+  clockService.setMockTime("2026-08-17 10:00");
+  await scheduler.run([...scheduler.oneTime.keys()][0]);
+  assert.equal(transport.sent.length, 2);
+  assert.equal(
+    transport.sent[1].reply.text,
+    "Current operations update",
+    "later runs must not repeat the first-run explanation",
+  );
 }
 
 function testRecurringScheduleParsing(): void {
@@ -283,8 +297,24 @@ async function testRecoveryAndOwnership(): Promise<void> {
 
   const listed = await recoveredService.listOwned(OWNER_ID, CHAT_ID);
   assert.equal(listed.length, 1);
+  const second = await recoveredService.create({
+    chatId: CHAT_ID,
+    ownerMemberId: OWNER_ID,
+    objective: "Send the Tuesday attendance summary.",
+    rawSchedulePhrase: "every Tuesday at 11am",
+  });
+  assert.ok(second.task);
+  assert.equal((await recoveredService.listOwned(OWNER_ID, CHAT_ID)).length, 2);
+
   const cancelled = await recoveredService.manage({ id: created.task!.id, ownerMemberId: OWNER_ID, action: "cancel" });
   assert.equal(cancelled.task?.status, "cancelled");
+  assert.equal(recoveredScheduler.oneTime.size, 1, "cancelling one task must preserve the other task's timer");
+  const remaining = await recoveredService.listOwned(OWNER_ID, CHAT_ID);
+  assert.deepEqual(remaining.map((task) => task.id), [second.task!.id]);
+
+  await recoveredService.manage({ id: second.task!.id, ownerMemberId: OWNER_ID, action: "cancel" });
+  assert.equal(recoveredScheduler.oneTime.size, 0, "cancelling all tasks must remove all pending timers");
+  assert.equal((await recoveredService.listOwned(OWNER_ID, CHAT_ID)).length, 0);
 }
 
 void run();

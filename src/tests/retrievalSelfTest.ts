@@ -21,8 +21,9 @@ import { AGENT_CONTEXT_LIMITS } from "../agent/runtime/contextLimits.js";
 import { reorganizeMonthlyRota } from "../integrations/googleSheets/helpers.js";
 import { isMonthlyRotaSheet } from "../integrations/googleSheets/utils.js";
 import { extractSearchTerms, takeDistinctSearchResults } from "../agent/persistence/searchTerms.js";
-import { preserveTemporalQueryScope } from "../domains/choir/intelligence/temporalQuery.js";
+import { addTemporalContext, preserveTemporalQueryScope } from "../domains/choir/intelligence/temporalQuery.js";
 import { VectorRepository } from "../integrations/pinecone/vectorRepository.js";
+import { clockService } from "../shared/clockService.js";
 
 async function run(): Promise<void> {
   testDeterministicSourceResolution();
@@ -31,6 +32,7 @@ async function run(): Promise<void> {
   testRetrievalToolCatalogue();
   testTemporalEvidenceProjection();
   testTemporalQueryScopePreservation();
+  testRelativeWeekResolution();
   testTemporalEvidenceMatching();
   testSemanticEvidenceProjection();
   testMonthlyRotaUsesMondayServiceWeeks();
@@ -64,6 +66,58 @@ function testTemporalQueryScopePreservation(): void {
     preserveTemporalQueryScope("choir members", "Who is in the choir?"),
     "choir members",
   );
+}
+
+function testRelativeWeekResolution(): void {
+  clockService.setMockTime("2026-09-01 12:00", "Europe/London");
+  try {
+    assert.deepEqual(addTemporalContext("schedule for this week").temporalData, [{
+      text: "this week",
+      date_equivalent: "31/08/2026",
+      end_date_equivalent: "06/09/2026",
+      day_equivalent: "Monday",
+    }]);
+    assert.deepEqual(addTemporalContext("schedule for previous week").temporalData, [{
+      text: "previous week",
+      date_equivalent: "24/08/2026",
+      end_date_equivalent: "30/08/2026",
+      day_equivalent: "Monday",
+    }]);
+  } finally {
+    clockService.clearMockTime();
+  }
+
+  clockService.setMockTime("2026-09-07 12:00", "Europe/London");
+  try {
+    assert.deepEqual(
+      addTemporalContext("members unavailable on Wednesday and Sunday").temporalData.map((value) => ({
+        text: value.text,
+        date: value.date_equivalent,
+      })),
+      [
+        { text: "Wednesday", date: "09/09/2026" },
+        { text: "Sunday", date: "13/09/2026" },
+      ],
+    );
+  } finally {
+    clockService.clearMockTime();
+  }
+
+  clockService.setMockTime("2026-09-02 09:01", "Europe/London");
+  try {
+    assert.deepEqual(
+      addTemporalContext("unavailable on Wednesday and Sunday of the previous week").temporalData.map((value) => ({
+        text: value.text,
+        date: value.date_equivalent,
+      })),
+      [
+        { text: "Wednesday", date: "26/08/2026" },
+        { text: "Sunday", date: "30/08/2026" },
+      ],
+    );
+  } finally {
+    clockService.clearMockTime();
+  }
 }
 
 function testDurableSearchTermExtraction(): void {

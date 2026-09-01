@@ -37,6 +37,7 @@ import { ScheduledAgentTaskService } from "../../agent/services/scheduledAgentTa
 import { env } from "../../config/env.js";
 import { agentConfig } from "../../config/agentConfig.js";
 import { createEchoDeploymentProfile } from "./profile.js";
+import { echoCapabilityRegistry } from "./capabilities.js";
 import type { AgentTool } from "../../agent/types.js";
 import { ApplicationSchedulerAdapter } from "../../integrations/scheduler/frameworkSchedulerAdapter.js";
 import type {
@@ -58,6 +59,7 @@ import {
 import { SetlistOperationsService } from "../../domains/choir/operations/setlistOperationsService.js";
 import { clockService } from "../../shared/clockService.js";
 import { logger } from "../../config/logger.js";
+import { addTemporalContext } from "../../domains/choir/intelligence/temporalQuery.js";
 
 const INTERRUPTED_EXECUTION_GRACE_MS = 30_000;
 
@@ -146,6 +148,7 @@ export async function createEchoAgentRuntime(input: {
     (obligation) => obligationScheduler?.schedule(obligation),
   );
   const dependencies: CoreToolDependencies = {
+    capabilities: echoCapabilityRegistry,
     identities,
     memory,
     obligations,
@@ -243,6 +246,7 @@ export async function createEchoAgentRuntime(input: {
   );
   obligationScheduler = new AgentObligationScheduler(obligations, agentService, scheduler);
   scheduledTasks.setRunner(async (activation) => {
+    const resolvedTemporalScope = addTemporalContext(activation.task.objective).temporalData;
     const result = await agentService.handleScheduledWake({
       eventKey: activation.executionKey,
       type: "scheduled_agent_task_due",
@@ -252,6 +256,7 @@ export async function createEchoAgentRuntime(input: {
         scheduledTaskId: activation.task.id,
         ownerMemberId: activation.task.ownerMemberId,
         objective: activation.task.objective,
+        resolvedTemporalScope,
         schedule: activation.task.schedule,
         previousProcedure: activation.task.procedure,
         scheduledFor: activation.scheduledFor,

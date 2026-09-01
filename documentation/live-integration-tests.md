@@ -45,6 +45,14 @@ route. Judge the observable result and state change.
 - **Expect:** A concise conversational reply with no choir-data retrieval or
   workflow mutation.
 
+### L01A - Capability Awareness
+
+- As `<ordinary-member>`, ask: `Echo, what can you do and how do I set a reminder?`
+- Repeat as `<creator>` and ask how to control the scheduler or application clock.
+- **Expect:** Agent activity shows `inspect_agent_capabilities`. The answer explains
+  only features available to the current member, uses the central capability
+  registry, and does not execute the features it describes.
+
 ### L02 - Catalogued Weekly Schedule
 
 - Set application time inside `<known-week>`.
@@ -175,12 +183,22 @@ These tests mutate staging setlists and obligations. Use a disposable
 ### L17 - Recurring Agent Task
 
 - As `<superuser>`, send an explicit task such as:
-  `Echo, remind the group every Monday at 10am with the members marked unavailable in the attendance sheet.`
-- **Expect:** Echo executes the objective immediately, persists one recurring
-  task, and shows its next run under `schedules`. The saved procedure must not
-  contain copied sheet results.
-- Advance past the next run and confirm it uses fresh data, then ask Echo to
-  cancel the recurring task.
+  `Echo, remind me every Monday at 6pm. Check the 2026 attendance sheet and send me a report of everyone marked unavailable on Wednesday and Sunday.`
+- **Expect:** Echo executes the objective immediately under a short explanation
+  that future messages may look like this result, persists one recurring task,
+  and shows its next run under `schedules`. Later executions omit that initial
+  explanation. The saved procedure must not contain copied sheet results. Bare
+  weekday names resolve to their nearest occurrence today or in the future; the
+  request does not need to say `previous week`.
+- Advance past the next Monday run and confirm Wednesday and Sunday are resolved
+  again from that execution date and fresh data is used. Then ask Echo to cancel
+  the recurring task.
+- With two active tasks, ask Echo to cancel an unspecified recurring reminder.
+  It must list both and ask which one; selecting one must leave the other active.
+  A different privileged member must not be able to view or cancel either task.
+- Repeat with `Wednesday and Sunday of the previous week`. The immediate and
+  scheduled runs must resolve both named days inside the preceding Monday-to-
+  Sunday window rather than mixing that window with current or future dates.
 
 ## Recovery And Failure Handling
 
@@ -237,6 +255,8 @@ an issue or commit message.
 | --- | --- | --- | --- | --- |
 | YYYY-MM-DD | local staging | Pass/Fail | None or L03, L14 | Short reason or fix reference |
 | 2026-09-01 | local staging | Pass | None | Full regression and live integration run. Fixed spreadsheet recovery, history-source selection, reminder prefix punctuation and idempotent mention labels. L16 nudge suppression passed; early submission could not be exercised because the live rota had no leader for that week. |
+| 2026-09-01 | local staging | Pass | None | Recurring reminder first-run labelling, custom missing-mark rules, requested headings and totals, future execution, ambiguous two-task cancellation, owner-only cancellation, and confirmed one-time cancellation all passed. |
+| 2026-09-01 | local staging | Pass | None | Capability awareness, casual and quoted conversation, attendance retrieval, member-memory recall, mentions, history search, role-aware help, scheduler permissions, sync, reminder validation/edit/ownership/scheduled cancellation, recurring creation/cancellation, setlist correction, Wednesday and Sunday rota delivery, broadcast, nudge planning/data deferral, restart recovery, and reverse-time cleanup passed. |
 
 ## Cleanup
 
