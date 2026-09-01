@@ -16,10 +16,12 @@ import {
 import { compactEvidence, type EvidenceCompactionReport } from "./evidenceCompactor.js";
 import { clockService } from "../../../shared/clockService.js";
 import { sha256 } from "../../../shared/utils/hash.js";
+import { agentConfig } from "../../../config/agentConfig.js";
 
 export interface RetrievalSourceSelection {
     sourceIds: RetrievalSourceId[];
     semanticSearch: boolean;
+    semanticResultLimit?: number;
 }
 
 export interface RetrievalProvenance {
@@ -27,6 +29,7 @@ export interface RetrievalProvenance {
     retrievedSources: RetrievalSourceId[];
     missingSources: RetrievalSourceId[];
     sheetNames: string[];
+    indexedSourceNames: string[];
     semanticSearchUsed: boolean;
     fallbackUsed: boolean;
     coverage: "complete" | "partial" | "none";
@@ -54,9 +57,12 @@ export async function retrieveDocuments(
         selection.sourceIds,
         temporalData.map((item) => item.date_equivalent),
     )
-    const semanticInitiallyRequired = selection.semanticSearch || resolved.unresolvedSources.length > 0
+    const selectedSemanticNames = [...resolved.sheetNames, ...resolved.indexedSourceNames]
+    const semanticInitiallyRequired = selection.semanticSearch
+        || resolved.indexedSourceNames.length > 0
+        || resolved.unresolvedSources.length > 0
     const semanticPromise = semanticInitiallyRequired
-        ? retrieveSemanticDocuments(vectordb, augmentedQuery, selection, resolved.sheetNames, temporalData.length > 0)
+        ? retrieveSemanticDocuments(vectordb, augmentedQuery, selection, selectedSemanticNames, temporalData.length > 0)
         : null
     const rowsBySheet = resolved.sheetNames.length > 0
         ? await sheetRepository.getAllRowsBySheet({ sheetNames: resolved.sheetNames, normalize: false })
@@ -87,7 +93,7 @@ export async function retrieveDocuments(
     if (semanticSearchUsed) {
         const semanticSheetNames = fallbackUsed
             ? [...new Set(initiallyMissing.flatMap((sourceId) => resolved.sourceSheets[sourceId] ?? []))]
-            : resolved.sheetNames
+            : selectedSemanticNames
         const rawRetrieved = semanticPromise
             ? await semanticPromise
             : await retrieveSemanticDocuments(vectordb, augmentedQuery, selection, semanticSheetNames, temporalData.length > 0)
@@ -110,18 +116,25 @@ export async function retrieveDocuments(
             if (sheetName) retrievedSheetTitles.push(sheetName)
         }
         retrievedDocuments = formatDocumentsForLLM(retrieved)
-        if (retrieved.length > 0) retrievedSources.push("semantic_knowledge")
+        retrievedSources.push(...selectedDocumentSourcesWithEvidence(selection, resolved.sourceDocuments, retrievedSheetTitles))
+        if (retrieved.length > 0 && selection.sourceIds.includes("semantic_knowledge")) {
+            retrievedSources.push("semantic_knowledge")
+        }
         logData(retrievedDocuments, "Retrieved documents from vector db")
     }
 
     const uniqueRetrievedSources = [...new Set(retrievedSources)]
     const missingSources = selection.sourceIds.filter((sourceId) => !uniqueRetrievedSources.includes(sourceId))
     const evidenceCount = Object.keys(structuredEvidence).length + (retrievedDocuments ? 1 : 0)
-    const coverage: RetrievalProvenance["coverage"] = evidenceCount === 0
-        ? "none"
-        : missingSources.length > 0 ? "partial" : "complete"
     const allSheetTitles = [...new Set([...resolved.sheetNames, ...retrievedSheetTitles])]
     const compacted = compactEvidence(structuredEvidence, retrievedDocuments)
+    const coverage: RetrievalProvenance["coverage"] = evidenceCount === 0
+        ? "none"
+        : missingSources.length > 0
+            || compacted.report.structuredTruncated
+            || compacted.report.semanticTruncated
+            ? "partial"
+            : "complete"
     const temporalEvidence = [
         JSON.stringify(structuredEvidence),
         ...retrievedDocumentEvidence.map((document) => JSON.stringify({
@@ -139,6 +152,7 @@ export async function retrieveDocuments(
         retrievedSources: uniqueRetrievedSources,
         missingSources,
         sheetNames: allSheetTitles,
+        indexedSourceNames: resolved.indexedSourceNames,
         semanticSearchUsed,
         fallbackUsed,
         coverage,
@@ -182,12 +196,25 @@ async function retrieveSemanticDocuments(
     const narrowQuery = hasTemporalScope && selection.sourceIds.length <= 2
     const restrictToSelectedSheets = sheetNames.length > 0 && !selection.sourceIds.includes("semantic_knowledge")
     const retriever = vectordb.asRetriever({
-        k: narrowQuery ? 3 : 5,
+        k: selection.semanticResultLimit
+            ?? (narrowQuery ? Math.min(3, agentConfig.retrieval.semanticDefaultResults) : agentConfig.retrieval.semanticDefaultResults),
         ...(restrictToSelectedSheets ? {
             filter: { sheetName: { $in: sheetNames.map((name) => name.toLowerCase().trim()) } },
         } : {}),
     })
     return deduplicateDocuments(await retriever.invoke(query))
+}
+
+function selectedDocumentSourcesWithEvidence(
+    selection: RetrievalSourceSelection,
+    sourceDocuments: Partial<Record<RetrievalSourceId, string>>,
+    retrievedSourceNames: string[],
+): RetrievalSourceId[] {
+    const normalizedRetrieved = new Set(retrievedSourceNames.map((name) => name.toLowerCase().trim()))
+    return selection.sourceIds.filter((sourceId) => {
+        const sourceName = sourceDocuments[sourceId]
+        return sourceName ? normalizedRetrieved.has(sourceName.toLowerCase().trim()) : false
+    })
 }
 
 function deduplicateDocuments<T extends { pageContent: string; metadata: Record<string, unknown> }>(documents: T[]): T[] {

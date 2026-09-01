@@ -40,6 +40,7 @@ export interface IdentityRepository {
 export type SpreadsheetFilterOperator = "equals" | "not_equals" | "contains" | "empty" | "not_empty";
 
 export interface SpreadsheetDataService {
+  listSheetNames?(): Promise<string[]>;
   inspectSheet(sheetName: string): Promise<{
     sheetName: string;
     columns: string[];
@@ -51,10 +52,13 @@ export interface SpreadsheetDataService {
     filters: Array<{ column: string; operator: SpreadsheetFilterOperator; value?: string }>;
     selectColumns: string[];
     limit: number;
+    offset?: number;
   }): Promise<{
     sheetName: string;
     rows: Record<string, string>[];
     matchedRows: number;
+    offset?: number;
+    nextOffset?: number;
     truncated: boolean;
   }>;
 }
@@ -182,7 +186,11 @@ export interface AgentActivitySink {
 }
 
 export interface ChoirKnowledgeService {
-  retrieve(query: string, routing?: { sourceIds: string[]; semanticSearch: boolean }): Promise<{
+  retrieve(query: string, routing?: {
+    sourceIds: string[];
+    semanticSearch: boolean;
+    semanticResultLimit?: number;
+  }): Promise<{
     context: string;
     sourceHash?: string;
     provenance?: {
@@ -190,6 +198,7 @@ export interface ChoirKnowledgeService {
       retrievedSources: string[];
       missingSources: string[];
       sheetNames: string[];
+      indexedSourceNames?: string[];
       semanticSearchUsed: boolean;
       fallbackUsed: boolean;
       coverage: "complete" | "partial" | "none";
@@ -205,6 +214,17 @@ export interface ChoirKnowledgeService {
         semanticTruncated: boolean;
       };
     };
+  }>;
+  readIndexedSource?(input: {
+    sourceId: string;
+    offset: number;
+    limit: number;
+  }): Promise<{
+    sourceId: string;
+    sourceName: string;
+    documents: Array<{ content: string; metadata: Record<string, unknown> }>;
+    nextOffset?: number;
+    coverage: "complete" | "partial" | "none";
   }>;
 }
 

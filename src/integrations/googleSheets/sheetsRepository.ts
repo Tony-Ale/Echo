@@ -20,6 +20,11 @@ export class SheetsRepository implements SpreadsheetDataService {
    */
   public constructor(private readonly client: sheets_v4.Sheets) {}
 
+  /** Returns exact workbook tab names for planner-driven source discovery. */
+  public async listSheetNames(): Promise<string[]> {
+    return this.listSheetTitles();
+  }
+
   public async inspectSheet(sheetName: string): Promise<{
     sheetName: string;
     columns: string[];
@@ -40,7 +45,15 @@ export class SheetsRepository implements SpreadsheetDataService {
     filters: Array<{ column: string; operator: SpreadsheetFilterOperator; value?: string }>;
     selectColumns: string[];
     limit: number;
-  }): Promise<{ sheetName: string; rows: Record<string, string>[]; matchedRows: number; truncated: boolean }> {
+    offset?: number;
+  }): Promise<{
+    sheetName: string;
+    rows: Record<string, string>[];
+    matchedRows: number;
+    offset: number;
+    nextOffset?: number;
+    truncated: boolean;
+  }> {
     const rows = await this.loadRawSheet(input.sheetName);
     const columns = uniqueStrings(rows.flatMap((row) => Object.keys(row)));
     const resolveColumn = (requested: string): string => {
@@ -55,11 +68,16 @@ export class SheetsRepository implements SpreadsheetDataService {
     }));
     const selected = input.selectColumns.map(resolveColumn);
     const matches = rows.filter((row) => filters.every((filter) => matchesFilter(row[filter.column] ?? "", filter.operator, filter.value)));
+    const offset = input.offset ?? 0;
+    const nextOffset = offset + input.limit;
+    const truncated = nextOffset < matches.length;
     return {
       sheetName: input.sheetName.trim(),
       matchedRows: matches.length,
-      truncated: matches.length > input.limit,
-      rows: matches.slice(0, input.limit).map((row) => Object.fromEntries(selected.map((column) => [
+      offset,
+      ...(truncated ? { nextOffset } : {}),
+      truncated,
+      rows: matches.slice(offset, nextOffset).map((row) => Object.fromEntries(selected.map((column) => [
         column,
         projectMatchedCell(row[column] ?? "", column, filters),
       ]))),

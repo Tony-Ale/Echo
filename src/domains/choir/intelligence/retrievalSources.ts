@@ -6,7 +6,15 @@ import {
   ORIGINALS_2026_ROTA,
   SM_LIBRARY,
 } from "../../../integrations/googleSheets/utils.js";
+import { docNames } from "../../../integrations/external_docs/utils.js";
 import { mapDateStringToMonthlyRota } from "./helpers.js";
+
+export const INDEXED_DOCUMENT_SOURCE_IDS = [
+  "choir_originals",
+  "annual_meeting_notes",
+  "choir_policy",
+  "choir_vision",
+] as const;
 
 export const RETRIEVAL_SOURCE_IDS = [
   "monthly_rota",
@@ -16,6 +24,7 @@ export const RETRIEVAL_SOURCE_IDS = [
   "song_library",
   "originals_rota",
   "documents",
+  ...INDEXED_DOCUMENT_SOURCE_IDS,
   "semantic_knowledge",
 ] as const;
 
@@ -28,8 +37,9 @@ export function isRetrievalSourceId(value: string): value is RetrievalSourceId {
 export interface RetrievalSourceDescriptor {
   id: RetrievalSourceId;
   description: string;
-  mode: "sheet" | "monthly_sheet" | "semantic";
+  mode: "sheet" | "monthly_sheet" | "indexed_document" | "semantic";
   sheetName?: string;
+  indexedSourceName?: string;
 }
 
 /** Semantic catalog shown to the selector; vendor-specific names stay internal. */
@@ -41,12 +51,18 @@ export const RETRIEVAL_SOURCE_CATALOG: readonly RetrievalSourceDescriptor[] = [
   { id: "song_library", mode: "sheet", sheetName: SM_LIBRARY, description: "Special ministrations, hymns and songs grouped by theme." },
   { id: "originals_rota", mode: "sheet", sheetName: ORIGINALS_2026_ROTA, description: "Original-song composition assignments, composers and songs." },
   { id: "documents", mode: "sheet", sheetName: DOCUMENTS_AND_RESOURCES, description: "Choir policies, vision, forms, meeting records and shared resource documents." },
+  { id: "choir_originals", mode: "indexed_document", indexedSourceName: docNames.oha_originals, description: "The complete indexed collection of the choir's original songs." },
+  { id: "annual_meeting_notes", mode: "indexed_document", indexedSourceName: docNames.annual_meeting, description: "Indexed annual choir meeting notes." },
+  { id: "choir_policy", mode: "indexed_document", indexedSourceName: docNames.choir_policy, description: "Indexed choir policies and operational guidance." },
+  { id: "choir_vision", mode: "indexed_document", indexedSourceName: docNames.choir_vision, description: "Indexed choir vision and purpose document." },
   { id: "semantic_knowledge", mode: "semantic", description: "Broad semantic search across indexed choir knowledge when the source is unclear or unstructured." },
 ] as const;
 
 export interface ResolvedRetrievalSources {
   sheetNames: string[];
+  indexedSourceNames: string[];
   sourceSheets: Partial<Record<RetrievalSourceId, string[]>>;
+  sourceDocuments: Partial<Record<RetrievalSourceId, string>>;
   unresolvedSources: RetrievalSourceId[];
 }
 
@@ -56,11 +72,18 @@ export function resolveRetrievalSources(
   temporalDates: string[],
 ): ResolvedRetrievalSources {
   const sourceSheets: Partial<Record<RetrievalSourceId, string[]>> = {};
+  const sourceDocuments: Partial<Record<RetrievalSourceId, string>> = {};
   const unresolvedSources: RetrievalSourceId[] = [];
 
   for (const sourceId of sourceIds) {
     const descriptor = RETRIEVAL_SOURCE_CATALOG.find((item) => item.id === sourceId);
     if (!descriptor || descriptor.mode === "semantic") continue;
+
+    if (descriptor.mode === "indexed_document") {
+      if (descriptor.indexedSourceName) sourceDocuments[sourceId] = descriptor.indexedSourceName;
+      else unresolvedSources.push(sourceId);
+      continue;
+    }
 
     if (descriptor.mode === "monthly_sheet") {
       const sheetNames = [...new Set(temporalDates.map(mapDateStringToMonthlyRota))];
@@ -75,9 +98,16 @@ export function resolveRetrievalSources(
 
   return {
     sourceSheets,
+    sourceDocuments,
     unresolvedSources,
     sheetNames: [...new Set(Object.values(sourceSheets).flatMap((names) => names ?? []))],
+    indexedSourceNames: [...new Set(Object.values(sourceDocuments).filter((name): name is string => Boolean(name)))],
   };
+}
+
+export function indexedDocumentSourceName(sourceId: RetrievalSourceId): string | undefined {
+  const source = RETRIEVAL_SOURCE_CATALOG.find((item) => item.id === sourceId);
+  return source?.mode === "indexed_document" ? source.indexedSourceName : undefined;
 }
 
 export function retrievalSourceDescription(sourceId: RetrievalSourceId): string {
@@ -89,7 +119,11 @@ export function retrievalSourceToolCatalogue(): string {
   return RETRIEVAL_SOURCE_CATALOG.map((source) => {
     const target = source.mode === "monthly_sheet"
       ? "monthly tabs such as aug 26"
-      : source.sheetName ? `tab: ${source.sheetName}` : undefined;
+      : source.sheetName
+        ? `tab: ${source.sheetName}`
+        : source.indexedSourceName
+          ? `indexed document: ${source.indexedSourceName}`
+          : undefined;
     return `${source.id}${target ? ` (${target})` : ""}: ${source.description}`;
   }).join(" | ");
 }

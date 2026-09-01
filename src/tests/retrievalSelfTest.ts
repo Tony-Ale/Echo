@@ -21,9 +21,11 @@ import { AGENT_CONTEXT_LIMITS } from "../agent/runtime/contextLimits.js";
 import { reorganizeMonthlyRota } from "../integrations/googleSheets/helpers.js";
 import { extractSearchTerms, takeDistinctSearchResults } from "../agent/persistence/searchTerms.js";
 import { preserveTemporalQueryScope } from "../domains/choir/intelligence/temporalQuery.js";
+import { VectorRepository } from "../integrations/pinecone/vectorRepository.js";
 
 async function run(): Promise<void> {
   testDeterministicSourceResolution();
+  testIndexedDocumentSourceResolution();
   testRetrievalToolCatalogue();
   testTemporalEvidenceProjection();
   testTemporalQueryScopePreservation();
@@ -36,7 +38,11 @@ async function run(): Promise<void> {
   testDurableSearchTermExtraction();
   testMultilineSpreadsheetProjection();
   await testSheetBatchCache();
+  await testSpreadsheetPagination();
   await testMultiSourceStructuredRetrieval();
+  await testPlannerControlledIndexedSearch();
+  await testCompactedEvidenceReportsPartialCoverage();
+  await testCompleteIndexedDocumentPage();
   await testEmptyStructuredSourceUsesBoundedFallback();
   await testStaleSemanticEvidenceDoesNotMatchTargetWeek();
   console.log("Retrieval routing self-tests passed.");
@@ -77,6 +83,14 @@ function testRetrievalToolCatalogue(): void {
   assert.match(catalogue, /attendance \(tab: 2026 attendance\): Member availability/);
   assert.match(catalogue, /monthly_rota \(monthly tabs such as aug 26\): Weekly choir duties/);
   assert.match(catalogue, /semantic_knowledge: Broad semantic search/);
+  assert.match(catalogue, /choir_originals \(indexed document: oha_originals\): The complete indexed collection/);
+}
+
+function testIndexedDocumentSourceResolution(): void {
+  const resolved = resolveRetrievalSources(["choir_originals"], []);
+  assert.deepEqual(resolved.sheetNames, []);
+  assert.deepEqual(resolved.indexedSourceNames, ["oha_originals"]);
+  assert.equal(resolved.sourceDocuments.choir_originals, "oha_originals");
 }
 
 function testMonthlyRotaUsesMondayServiceWeeks(): void {
@@ -147,6 +161,46 @@ async function testSheetBatchCache(): Promise<void> {
   repository.clearCache();
   await repository.getAllRowsBySheet(request);
   assert.equal(batchCalls, 2);
+}
+
+async function testSpreadsheetPagination(): Promise<void> {
+  const repository = new SheetsRepository({
+    spreadsheets: {
+      values: {
+        async batchGet() {
+          return { data: { valueRanges: [{ values: [
+            ["Name"],
+            ["Member A"],
+            ["Member B"],
+            ["Member C"],
+            ["Member D"],
+          ] }] } };
+        },
+        async get() { throw new Error("Individual fallback should not run."); },
+      },
+    },
+  } as never);
+  const first = await repository.querySheet({
+    sheetName: "activity log",
+    filters: [],
+    selectColumns: ["Name"],
+    limit: 2,
+    offset: 1,
+  });
+  assert.deepEqual(first.rows, [{ Name: "Member B" }, { Name: "Member C" }]);
+  assert.equal(first.nextOffset, 3);
+  assert.equal(first.truncated, true);
+
+  const final = await repository.querySheet({
+    sheetName: "activity log",
+    filters: [],
+    selectColumns: ["Name"],
+    limit: 2,
+    offset: first.nextOffset,
+  });
+  assert.deepEqual(final.rows, [{ Name: "Member D" }]);
+  assert.equal(final.nextOffset, undefined);
+  assert.equal(final.truncated, false);
 }
 
 function testMultilineSpreadsheetProjection(): void {
@@ -233,6 +287,71 @@ async function testMultiSourceStructuredRetrieval(): Promise<void> {
   assert.deepEqual(result.provenance.retrievedSources.sort(), ["annual_events", "monthly_rota"]);
   assert.match(result.context, /Wednesday 12\/08\/2026\\nBible study/);
   assert.match(result.context, /Midweek event/);
+}
+
+async function testPlannerControlledIndexedSearch(): Promise<void> {
+  let retrieverOptions: Record<string, unknown> | undefined;
+  const vectorStore = {
+    asRetriever(options: Record<string, unknown>) {
+      retrieverOptions = options;
+      return {
+        async invoke() {
+          return [{
+            pageContent: "Original song: Example",
+            metadata: { sheetName: "oha_originals", rowId: "oha_originals-chunk-000000" },
+          }];
+        },
+      };
+    },
+  } as unknown as PineconeStore;
+  const result = await retrieveDocuments(
+    "Find choir originals about increase",
+    fakeSheets(new Map()),
+    vectorStore,
+    { sourceIds: ["choir_originals"], semanticSearch: true, semanticResultLimit: 7 },
+  );
+
+  assert.equal(retrieverOptions?.k, 7);
+  assert.deepEqual(retrieverOptions?.filter, { sheetName: { $in: ["oha_originals"] } });
+  assert.deepEqual(result.provenance.retrievedSources, ["choir_originals"]);
+  assert.deepEqual(result.provenance.indexedSourceNames, ["oha_originals"]);
+}
+
+async function testCompactedEvidenceReportsPartialCoverage(): Promise<void> {
+  const result = await retrieveDocuments(
+    "List attendance notes",
+    fakeSheets(new Map([["2026 attendance", [{ notes: "x".repeat(10_000) }]]])),
+    fakeVectorStore(() => []),
+    { sourceIds: ["attendance"], semanticSearch: false },
+  );
+  assert.equal(result.provenance.compaction.structuredTruncated, true);
+  assert.equal(result.provenance.coverage, "partial");
+}
+
+async function testCompleteIndexedDocumentPage(): Promise<void> {
+  const repository = new VectorRepository({
+    async listPaginated() {
+      return {
+        vectors: [
+          { id: "oha_originals-chunk-000000" },
+          { id: "oha_originals-chunk-000001" },
+          { id: "oha_originals-chunk-000002" },
+        ],
+        pagination: {},
+      };
+    },
+    async fetch(ids: string[]) {
+      return {
+        records: Object.fromEntries(ids.map((id, index) => [id, {
+          metadata: { text: `Chunk ${index + 1}`, documentName: "oha_originals", chunkIndex: String(index) },
+        }])),
+      };
+    },
+  } as never);
+  const result = await repository.fetchDocumentsBySource({ sourceName: "oha_originals", offset: 0, limit: 2 });
+  assert.deepEqual(result.documents.map((document) => document.content), ["Chunk 1", "Chunk 2"]);
+  assert.equal(result.nextOffset, 2);
+  assert.equal(result.documents[0].metadata.text, undefined);
 }
 
 async function testEmptyStructuredSourceUsesBoundedFallback(): Promise<void> {

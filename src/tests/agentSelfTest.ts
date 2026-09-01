@@ -80,6 +80,7 @@ async function run(): Promise<void> {
     await testAtomicToolCompletesWithoutReplanning();
     await testNonTerminalToolPreservesAgenticLoop();
     await testConstrainedGenericSpreadsheetEvaluation();
+    await testUnknownSpreadsheetColumnCanBeRepaired();
     await testAggregateQueryBroadensBeforeClaimingAbsence();
     await testValidatedNextToolAvoidsPlannerRoundTrip();
     await testDuplicateNextToolIsDiscarded();
@@ -90,6 +91,7 @@ async function run(): Promise<void> {
     await testObligationRecoveryExpiresPastSetlistBroadcasts();
     await testDuplicateEventRecovery();
     await testMaximumSteps();
+    await testInvalidToolInputCanBeReplanned();
     await testDeterministicToolFailureIsNotRetryable();
     await testFailureLimitIsNotReportedAsStepLimit();
     await testAgentActivityLifecycle();
@@ -903,7 +905,7 @@ async function testMentionTool(): Promise<void> {
   const planner = new ScriptedAgentPlanner(() => ({
     kind: "tool",
     toolName: "compose_member_message",
-    input: { text: "Rehearsal starts at 5pm.", memberNames: ["Member"] },
+    input: { text: "@Member rehearsal starts at 5pm.", memberNames: ["Member"] },
     reason: "The message must contain a verified WhatsApp mention.",
   }));
   const runtime = createRuntime(planner, memberIdentity(), { identities });
@@ -912,6 +914,7 @@ async function testMentionTool(): Promise<void> {
 
   assert.equal(reply?.mentions?.[0], "200@s.whatsapp.net");
   assert.match(reply?.text ?? "", /@Member/);
+  assert.doesNotMatch(reply?.text ?? "", /@@Member/);
 }
 
 async function testPermissionGate(): Promise<void> {
@@ -1971,6 +1974,41 @@ async function testDeterministicToolFailureIsNotRetryable(): Promise<void> {
   assert.equal(tools.catalogFor(event, context, [failedStep]).some((tool) => tool.name === "broken_structured_tool"), false);
 }
 
+async function testInvalidToolInputCanBeReplanned(): Promise<void> {
+  const tools = new AgentToolRegistry([{
+    name: "bounded_read",
+    description: "Test repairable model arguments.",
+    capability: "conversation",
+    schema: z.object({ limit: z.number().int().min(1).max(4) }),
+    sideEffect: "read",
+    async execute() { return { status: "success", summary: "Read completed." }; },
+  }]);
+  const event = transportEvent("repairable-tool-input", "Read everything");
+  const context = contextFor(memberIdentity());
+  const result = await tools.execute("bounded_read", { limit: 50 }, {
+    event,
+    turnId: "77777777-7777-4777-8777-777777777777",
+    step: 0,
+    actor: context.actor,
+    signal: new AbortController().signal,
+  });
+  const failedStep = {
+    step: 0,
+    decision: {
+      kind: "tool" as const,
+      toolName: "bounded_read",
+      input: { limit: 50 },
+      reason: "Exercise repairable input validation.",
+    },
+    result,
+  };
+
+  assert.equal(result.retryable, true);
+  assert.equal(result.nonFatal, true);
+  assert.match(result.error ?? "", /less than or equal to 4/);
+  assert.equal(tools.catalogFor(event, context, [failedStep]).some((tool) => tool.name === "bounded_read"), true);
+}
+
 async function testFailureLimitIsNotReportedAsStepLimit(): Promise<void> {
   const activityEvents: AgentActivityEvent[] = [];
   const planner = new ScriptedAgentPlanner(() => ({
@@ -2265,9 +2303,11 @@ async function testCapabilityCatalogActivation(): Promise<void> {
     create_scheduled_agent_task: ["objective", "rawSchedulePhrase"],
     list_scheduled_agent_tasks: [],
     manage_scheduled_agent_task: ["action", "objective", "rawSchedulePhrase", "taskId"],
+    list_knowledge_sources: [],
     inspect_spreadsheet: ["sheetName"],
-    query_spreadsheet: ["filters", "limit", "selectColumns", "sheetName"],
-    retrieve_choir_knowledge: ["query", "semanticSearch", "sourceIds"],
+    query_spreadsheet: ["filters", "limit", "offset", "selectColumns", "sheetName"],
+    retrieve_choir_knowledge: ["query", "semanticResultLimit", "semanticSearch", "sourceIds"],
+    read_indexed_source: ["limit", "offset", "sourceId"],
     read_week_schedule: ["weekStart"],
     sync_if_stale: ["force", "reason"],
     resolve_members: ["names"],
@@ -2299,6 +2339,10 @@ async function testCapabilityCatalogActivation(): Promise<void> {
   assert.equal(initial.some((tool) => tool.name === "onboard_current_sender"), false);
   assert.equal(initial.some((tool) => tool.name === "activate_capability"), true);
   assert.equal(initial.some((tool) => tool.name === "acquire_context"), true);
+  assert.match(
+    initial.find((tool) => tool.name === "acquire_context")?.inputSchema ?? "",
+    /Search durable messages from the current chat/,
+  );
   assert.equal(initial.some((tool) => tool.name === "search_conversation_history"), false);
   assert.equal(
     runtime.tools.capabilitiesFor(event, context, []).some(
@@ -2368,8 +2412,8 @@ async function testCapabilityCatalogActivation(): Promise<void> {
     },
     }],
   );
-  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "inspect_spreadsheet"), false);
-  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "query_spreadsheet"), false);
+  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "inspect_spreadsheet"), true);
+  assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "query_spreadsheet"), true);
   assert.equal(afterCataloguedEvidence.some((tool) => tool.name === "retrieve_choir_knowledge"), true);
 
   assert.equal(runtime.tools.activationForTool(event, context, [], "onboard_current_sender"), null);
@@ -2680,6 +2724,77 @@ async function testAggregateQueryBroadensBeforeClaimingAbsence(): Promise<void> 
   assert.equal(queryCalls, 2);
 }
 
+async function testUnknownSpreadsheetColumnCanBeRepaired(): Promise<void> {
+  const planner = new ScriptedAgentPlanner((input) => {
+    if (input.previousSteps.length === 0) {
+      return {
+        kind: "tool",
+        toolName: "query_spreadsheet",
+        input: {
+          sheetName: "attendance",
+          filters: [{ column: "Date", operator: "equals", value: "2026-08-11" }],
+          selectColumns: ["Member Name"],
+        },
+        reason: "Attempt the requested query.",
+      };
+    }
+    if (input.previousSteps.length === 1) {
+      assert.equal(input.previousSteps[0]?.result?.nonFatal, true);
+      return {
+        kind: "tool",
+        toolName: "inspect_spreadsheet",
+        input: { sheetName: "attendance" },
+        reason: "Discover the actual schema.",
+      };
+    }
+    if (input.previousSteps.length === 2) {
+      return {
+        kind: "tool",
+        toolName: "query_spreadsheet",
+        input: {
+          sheetName: "attendance",
+          filters: [{ column: "attendance", operator: "contains", value: "11-August-26" }],
+          selectColumns: ["description", "attendance"],
+        },
+        reason: "Retry with inspected columns.",
+      };
+    }
+    return { kind: "respond", message: "Member A was unavailable.", reason: "The repaired query returned the record." };
+  });
+  const runtime = createRuntime(planner, {
+    id: CREATOR_ID,
+    canonicalName: "Creator",
+    displayName: "Creator",
+    roles: ["member", "superuser", "creator"],
+    status: "active",
+  }, {
+    maxSteps: 5,
+    spreadsheets: {
+      async inspectSheet(sheetName) {
+        return { sheetName, columns: ["description", "attendance"], rowCount: 1, sampleRows: [] };
+      },
+      async querySheet(input) {
+        if (input.selectColumns.includes("Member Name")) {
+          throw new Error("Column 'Member Name' was not found in sheet 'attendance'.");
+        }
+        return {
+          sheetName: input.sheetName,
+          rows: [{ description: "August", attendance: "11-August-26 -> Member A: NA" }],
+          matchedRows: 1,
+          offset: 0,
+          truncated: false,
+        };
+      },
+    },
+  });
+
+  const reply = await runtime.service.handleMessage(
+    incomingMessage("spreadsheet-column-repair", "Who was unavailable yesterday?"),
+    { allowedToolNames: ["inspect_spreadsheet", "query_spreadsheet"], maxSteps: 5, includeRecentConversation: false },
+  );
+  assert.equal(reply?.text, "Member A was unavailable.");
+}
+
 function createRuntime(
   planner: ScriptedAgentPlanner,
   actor: MemberIdentity | null,
@@ -2723,6 +2838,14 @@ function createRuntime(
         return options.knowledgeResult
           ?? { context: options.knowledgeContext ?? "Current choir information", sourceHash: "1234567890abcdef" };
       },
+      async readIndexedSource(input) {
+        return {
+          sourceId: input.sourceId,
+          sourceName: input.sourceId,
+          documents: [],
+          coverage: "none" as const,
+        };
+      },
     },
     sync: {
       async syncIfStale() {
@@ -2733,6 +2856,7 @@ function createRuntime(
     workflows,
     scheduledTasks: options.scheduledTasks ?? unavailableScheduledTaskManager(),
     spreadsheets: options.spreadsheets ?? {
+      async listSheetNames() { return []; },
       async inspectSheet(sheetName) {
         return { sheetName, columns: [], rowCount: 0, sampleRows: [] };
       },

@@ -9,7 +9,7 @@ export function isExplicitWorkflowActivation(text: string, quotedMessageId?: str
 export function isExplicitReminderActivation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return [
-    /^(?:@\S+\s+)?(?:echo\s+)?(?:please\s+)?remind\s+(?:me|us|everyone|the\s+(?:group|choir))\b/,
+    /^(?:@\S+\s+)?(?:echo(?:\s*[,.:;-]\s*|\s+))?(?:please\s+)?remind\s+(?:me|us|everyone|the\s+(?:group|choir))\b/,
     /\b(?:can|could|would)\s+you\s+remind\s+(?:me|us|everyone|the\s+(?:group|choir))\b/,
     /\bplease\s+remind\s+(?:me|us|everyone|the\s+(?:group|choir))\b/,
     /\bset\s+(?:a\s+)?reminder\b/,

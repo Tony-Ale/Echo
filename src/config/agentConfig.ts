@@ -71,7 +71,14 @@ const agentConfigurationSchema = z.object({
     semanticEvidenceTokens: tokenBudget,
     fieldTokens: tokenBudget,
     weeklyEvidenceTokens: tokenBudget,
-  }),
+    spreadsheetMaximumPageSize: z.number().int().min(1).max(500),
+    semanticDefaultResults: z.number().int().min(1).max(50),
+    semanticMaximumResults: z.number().int().min(1).max(50),
+    indexedDocumentMaximumPageSize: z.number().int().min(1).max(100),
+  }).refine(
+    (value) => value.semanticDefaultResults <= value.semanticMaximumResults,
+    "retrieval.semanticDefaultResults must not exceed retrieval.semanticMaximumResults",
+  ),
 });
 
 export type AgentConfiguration = z.infer<typeof agentConfigurationSchema>;

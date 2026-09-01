@@ -100,6 +100,61 @@ export class VectorRepository {
     return result;
   }
 
+  /**
+   * Reads one ordered page from a named indexed source without performing a
+   * similarity search. This is used when the planner needs complete coverage
+   * rather than the most semantically similar chunks.
+   */
+  public async fetchDocumentsBySource(input: {
+    sourceName: string;
+    offset: number;
+    limit: number;
+  }): Promise<{
+    documents: Array<{ content: string; metadata: Record<string, unknown> }>;
+    nextOffset?: number;
+  }> {
+    const allIds = await this.listVectorIdsByPrefix(`${input.sourceName}-`);
+    const ids = allIds.slice(input.offset, input.offset + input.limit);
+    const nextOffset = input.offset + input.limit < allIds.length
+      ? input.offset + input.limit
+      : undefined;
+    if (ids.length === 0) return { documents: [] };
+
+    const response = await this.index.fetch(ids);
+    const records = response.records ?? {};
+    const documents = ids.flatMap((id) => {
+      const metadata = records[id]?.metadata as Record<string, unknown> | undefined;
+      if (!metadata) return [];
+      const content = typeof metadata.text === "string"
+        ? metadata.text
+        : typeof metadata.pageContent === "string" ? metadata.pageContent : "";
+      if (!content) return [];
+      const { text: _text, pageContent: _pageContent, ...provenance } = metadata;
+      return [{ content, metadata: { ...provenance, vectorId: id } }];
+    });
+    return { documents, nextOffset };
+  }
+
+  private async listVectorIdsByPrefix(prefix: string): Promise<string[]> {
+    const ids: string[] = [];
+    let paginationToken: string | undefined;
+    do {
+      const page = await (this.index as unknown as {
+        listPaginated(args: {
+          prefix: string;
+          limit: number;
+          paginationToken?: string;
+        }): Promise<{
+          vectors?: Array<{ id?: string }>;
+          pagination?: { next?: string };
+        }>;
+      }).listPaginated({ prefix, limit: MAX_BATCH, paginationToken });
+      ids.push(...(page.vectors ?? []).flatMap((vector) => vector.id ? [vector.id] : []));
+      paginationToken = page.pagination?.next;
+    } while (paginationToken);
+    return ids.sort();
+  }
+
   public convertSheetRowToDocument(row:SheetRow){
     const metadata = {
       sheetName: row.sheetName,

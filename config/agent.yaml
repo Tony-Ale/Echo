@@ -56,3 +56,9 @@ retrieval:
   semanticEvidenceTokens: 750
   fieldTokens: 375
   weeklyEvidenceTokens: 2000
+  # Retrieval tools remain bounded per call; the planner can request another
+  # page when a result reports that more evidence is available.
+  spreadsheetMaximumPageSize: 100
+  semanticDefaultResults: 5
+  semanticMaximumResults: 12
+  indexedDocumentMaximumPageSize: 4

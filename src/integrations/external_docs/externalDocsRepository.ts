@@ -3,6 +3,7 @@ import { customExtractAndChunkText, extractAndchunkDocuments } from "./processDo
 import { docNames } from "./utils";
 import { normalizeRow } from "../../sync/rowNormalizer";
 import { logData } from "../../logger/execLogger";
+import { sha256 } from "../../shared/utils/hash";
 
 export class ExternalDocumentsRepository{
 
@@ -23,9 +24,23 @@ export class ExternalDocumentsRepository{
                     documents = await extractAndchunkDocuments(filePath)
                 }
 
-                const normalizedDocuments = documents.map(doc=>(
-                    normalizeRow(docName, {content: doc})
-                ))
+                const normalizedDocuments = documents.map((doc, index) => {
+                    const normalized = normalizeRow(docName, {content: doc})
+                    const chunkIndex = String(index).padStart(6, "0")
+                    return {
+                        ...normalized,
+                        // Ordered IDs and chunk metadata make complete indexed
+                        // reads restart-safe and independent of vector ranking.
+                        rowId: `${docName}-chunk-${chunkIndex}`,
+                        contentHash: sha256(`${normalized.contentHash}|${chunkIndex}|${documents.length}`),
+                        metadata: {
+                            sourceType: "external_document",
+                            documentName: docName,
+                            chunkIndex,
+                            chunkCount: String(documents.length),
+                        },
+                    }
+                })
 
                 processingReport[docName] = "Success, Num of Chunks: " + normalizedDocuments.length
 

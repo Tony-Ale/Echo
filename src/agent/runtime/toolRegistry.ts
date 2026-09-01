@@ -39,8 +39,10 @@ const REMINDER_EXTERNAL_CONTEXT_TOOLS = new Set([
   "retrieve_choir_knowledge",
   "read_week_schedule",
   "sync_if_stale",
+  "list_knowledge_sources",
   "inspect_spreadsheet",
   "query_spreadsheet",
+  "read_indexed_source",
 ]);
 
 /**
@@ -146,7 +148,11 @@ export class AgentToolRegistry {
         status: "error",
         summary: `Invalid input for ${toolName}.`,
         error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
-        retryable: false,
+        // Model-produced arguments can be repaired on the next planning step.
+        // Keep the tool visible and do not consume the integration-failure
+        // budget; maxSteps still bounds repeated invalid attempts.
+        retryable: true,
+        nonFatal: true,
       };
     }
 
@@ -208,6 +214,7 @@ export class AgentToolRegistry {
       .filter((tool) => CONTEXT_SOURCE_TOOLS.has(tool.name) && tool.sideEffect === "read")
       .map((tool) => ({
         toolName: tool.name,
+        description: tool.description,
         inputSchema: tool.schema.description ?? "{}",
       }));
     const sourceNameValues = sources.map((source) => source.toolName);
@@ -356,7 +363,7 @@ function looksLikeAdministrationRequest(text: string): boolean {
 function shouldExposeSync(steps: AgentStep[]): boolean {
   if (steps.some((step) => step.decision.kind === "tool" && step.decision.toolName === "sync_if_stale")) return false;
   return steps.some((step) => {
-    if (step.decision.kind !== "tool" || !["retrieve_choir_knowledge", "read_week_schedule"].includes(step.decision.toolName)) {
+    if (step.decision.kind !== "tool" || !["retrieve_choir_knowledge", "read_week_schedule", "read_indexed_source"].includes(step.decision.toolName)) {
       return false;
     }
     const data = step.result?.data;
@@ -368,7 +375,7 @@ function shouldExposeSync(steps: AgentStep[]): boolean {
 function capabilityFor(tool: AgentTool): AgentToolCapability {
   if (tool.capability) return tool.capability;
   if (["get_current_time", "search_conversation_history", "activate_capability"].includes(tool.name)) return "conversation";
-  if (["retrieve_choir_knowledge", "read_week_schedule", "sync_if_stale", "inspect_spreadsheet", "query_spreadsheet"].includes(tool.name)) return "knowledge";
+  if (["retrieve_choir_knowledge", "read_week_schedule", "sync_if_stale", "list_knowledge_sources", "inspect_spreadsheet", "query_spreadsheet", "read_indexed_source"].includes(tool.name)) return "knowledge";
   if (["read_member_memory", "read_context_memory", "remember_member_fact"].includes(tool.name)) return "memory";
   if ([
     "create_reminder",
@@ -431,18 +438,7 @@ function isToolDiscoverable(
   ) return false;
   if (tool.name === "onboard_current_sender" && context.actor) return false;
   if (tool.name === "sync_if_stale" && !shouldExposeSync(previousSteps)) return false;
-  if (
-    ["inspect_spreadsheet", "query_spreadsheet"].includes(tool.name)
-    && hasCataloguedRetrievalAttempt(previousSteps)
-  ) return false;
   return true;
-}
-
-function hasCataloguedRetrievalAttempt(steps: AgentStep[]): boolean {
-  return steps.some((step) => {
-    if (step.decision.kind !== "tool" || step.decision.toolName !== "retrieve_choir_knowledge") return false;
-    return step.result?.status === "success";
-  });
 }
 
 /** Classifies thrown integration failures without coupling the agent to one provider. */

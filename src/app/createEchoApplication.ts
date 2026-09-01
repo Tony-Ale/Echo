@@ -20,6 +20,7 @@ import type { AgentActivitySink } from "../agent/ports.js";
 import { loadModelConfiguration } from "../integrations/models/modelConfiguration.js";
 import { LangChainModelRegistry } from "../integrations/models/modelRegistry.js";
 import { PersistentScheduleVisibility } from "./scheduleVisibility.js";
+import { VectorRepository } from "../integrations/pinecone/vectorRepository.js";
 
 export interface EchoApplication {
   agentTools: Awaited<ReturnType<typeof createEchoAgentRuntime>>["toolCatalog"];
@@ -43,12 +44,17 @@ export async function createEchoApplication(input: {
   activitySink?: AgentActivitySink;
 }): Promise<EchoApplication> {
   const models = new LangChainModelRegistry(loadModelConfiguration());
-  const vectorStore = await createVectorStore(getPineconeIndex());
+  const pineconeIndex = getPineconeIndex();
+  const vectorStore = await createVectorStore(pineconeIndex);
   const sheetsRepository = new SheetsRepository(createGoogleSheetsClient());
   const memoryRepository = new SupabaseMemoryRepository("echo");
   const identities = new SupabaseIdentityRepository();
   const weeklyInterpretations = new SupabaseWeeklyInterpretationRepository();
-  const intelligence = new ChoirIntelligenceService(vectorStore, sheetsRepository);
+  const intelligence = new ChoirIntelligenceService(
+    vectorStore,
+    sheetsRepository,
+    new VectorRepository(pineconeIndex),
+  );
   const workflowRepository = new WorkflowRepository();
   const scheduler = new ApplicationSchedulerAdapter();
   const reminderScheduler = new ReminderScheduler(scheduler);

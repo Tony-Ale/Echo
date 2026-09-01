@@ -2,6 +2,8 @@ import { z } from "zod";
 import { DateTime } from "luxon";
 import {
   RETRIEVAL_SOURCE_IDS,
+  INDEXED_DOCUMENT_SOURCE_IDS,
+  RETRIEVAL_SOURCE_CATALOG,
   retrievalSourceToolCatalogue,
 } from "../../domains/choir/intelligence/retrievalSources.js";
 import { preserveTemporalQueryScope } from "../../domains/choir/intelligence/temporalQuery.js";
@@ -75,9 +77,32 @@ export function createPlatformAgentTools(dependencies: CoreToolDependencies): Ag
     createScheduledAgentTaskTool(dependencies.scheduledTasks),
     listScheduledAgentTasksTool(dependencies.scheduledTasks),
     manageScheduledAgentTaskTool(dependencies.scheduledTasks),
+    ...(dependencies.spreadsheets.listSheetNames ? [listKnowledgeSourcesTool(dependencies.spreadsheets)] : []),
     inspectSpreadsheetTool(dependencies.spreadsheets),
     querySpreadsheetTool(dependencies.spreadsheets),
   ];
+}
+
+function listKnowledgeSourcesTool(spreadsheets: SpreadsheetDataService): AgentTool {
+  const schema = z.object({}).describe("{}");
+  return {
+    name: "list_knowledge_sources",
+    description: "List catalogued choir sources and exact workbook tab names. Use this when the required source is unclear or a user refers to an uncatalogued sheet. Source discovery returns metadata only, not source contents.",
+    capability: "knowledge",
+    schema,
+    sideEffect: "read",
+    requiresRole: "superuser",
+    async execute() {
+      return {
+        status: "success",
+        summary: "Available knowledge sources listed.",
+        data: {
+          cataloguedSources: RETRIEVAL_SOURCE_CATALOG,
+          spreadsheetTabs: await spreadsheets.listSheetNames!(),
+        },
+      };
+    },
+  };
 }
 
 function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
@@ -85,7 +110,7 @@ function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool
     .describe('{"sheetName":"exact spreadsheet tab name supplied by the user or trusted context"}');
   return {
     name: "inspect_spreadsheet",
-    description: "Inspect the columns and a bounded structural sample of an explicitly named uncatalogued spreadsheet tab before querying it. sampleRows may be partial and cannot prove that an unshown record is absent. Use catalogued choir sources through retrieve_choir_knowledge when that tool is available.",
+    description: "Inspect the columns and a bounded structural sample of an exact permitted spreadsheet tab before querying it. sampleRows may be partial and cannot prove that an unshown record is absent. Catalogue retrieval is usually faster, but it does not prevent direct inspection when another view is needed.",
     capability: "knowledge",
     schema,
     sideEffect: "read",
@@ -109,6 +134,7 @@ function inspectSpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool
 }
 
 function querySpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
+  const defaultPageSize = Math.min(50, agentConfig.retrieval.spreadsheetMaximumPageSize);
   const filterSchema = z.object({
     column: z.string().trim().min(1).max(150),
     operator: z.enum(["equals", "not_equals", "contains", "empty", "not_empty"]),
@@ -122,22 +148,41 @@ function querySpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
     sheetName: z.string().trim().min(1).max(150),
     filters: z.array(filterSchema).max(8).default([]),
     selectColumns: z.array(z.string().trim().min(1).max(150)).min(1).max(12),
-    limit: z.number().int().min(1).max(100).default(50),
+    limit: z.number().int().min(1).max(agentConfig.retrieval.spreadsheetMaximumPageSize).default(defaultPageSize),
+    offset: z.number().int().min(0).default(0),
   }).describe(JSON.stringify({
     sheetName: "exact inspected spreadsheet tab name",
     filters: [{ column: "exact inspected column", operator: "equals, not_equals, contains, empty, or not_empty", value: "required except for empty/not_empty" }],
     selectColumns: ["one or more exact inspected columns to return"],
-    limit: "1-100, defaults to 50",
+    limit: `1-${agentConfig.retrieval.spreadsheetMaximumPageSize}, defaults to ${defaultPageSize}`,
+    offset: "zero-based row offset; use nextOffset from the previous result",
   }));
   return {
     name: "query_spreadsheet",
-    description: "Query a specifically named uncatalogued spreadsheet tab with deterministic filters and a bounded projection. Inspect first and use only discovered columns. selectColumns must contain at least one column. For a multiline aggregate cell, first filter by the least sufficient record identity or literal date and inspect the projected line; do not append an inferred weekday or combine that locator with the answer value because either can create a false zero match. This returns current rows, not a final message.",
+    description: "Query a specifically named spreadsheet tab with deterministic filters, a bounded projection and pagination. Inspect first and use only discovered columns. If a query reports an unknown column, inspect that tab once and then retry with the exact discovered columns before changing sources. When truncated=true, continue from nextOffset if complete coverage is required. For a multiline aggregate cell, first filter by the least sufficient record identity or literal date and inspect the projected line; do not append an inferred weekday or combine that locator with the answer value because either can create a false zero match. This returns current rows, not a final message.",
     capability: "knowledge",
     schema,
     sideEffect: "read",
     requiresRole: "superuser",
     async execute(input) {
-      const result = await spreadsheets.querySheet(input);
+      let result: Awaited<ReturnType<SpreadsheetDataService["querySheet"]>>;
+      try {
+        result = await spreadsheets.querySheet(input);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (isUnknownSpreadsheetColumnError(message)) {
+          return {
+            status: "error",
+            summary: "The query used a column that is not present in this tab. Inspect the tab once, then retry with the exact discovered columns.",
+            error: message,
+            retryable: true,
+            // A model-supplied column mismatch is repairable input, not an
+            // integration outage and must not consume the failure budget.
+            nonFatal: true,
+          };
+        }
+        throw error;
+      }
       const needsBroaderRecordCheck = result.matchedRows === 0 && hasRepeatedContainsFilters(input.filters);
       return {
         status: "success",
@@ -152,6 +197,10 @@ function querySpreadsheetTool(spreadsheets: SpreadsheetDataService): AgentTool {
       };
     },
   };
+}
+
+function isUnknownSpreadsheetColumnError(message: string): boolean {
+  return /^Column '.+' was not found in sheet '.+'\.$/i.test(message.trim());
 }
 
 function hasRepeatedContainsFilters(
@@ -443,6 +492,7 @@ export function createChoirAgentTools(dependencies: CoreToolDependencies): Agent
       prepareSetlistBroadcastTool(dependencies.setlistOperations),
     ] : []),
     retrieveKnowledgeTool(dependencies.knowledge),
+    ...(dependencies.knowledge.readIndexedSource ? [readIndexedSourceTool(dependencies.knowledge)] : []),
     readWeekScheduleTool(dependencies.knowledge, dependencies.weeklyInterpretations),
     syncIfStaleTool(dependencies.sync),
   ];
@@ -743,12 +793,13 @@ function submitSetlistTool(workflows: ChoirWorkflowService): AgentTool {
 function retrieveKnowledgeTool(knowledge: ChoirKnowledgeService): AgentTool {
   const schema = z.object({
     query: z.string().min(1).max(1000),
-    sourceIds: z.array(z.enum(RETRIEVAL_SOURCE_IDS)).min(1).max(4),
+    sourceIds: z.array(z.enum(RETRIEVAL_SOURCE_IDS)).min(1).max(RETRIEVAL_SOURCE_IDS.length),
     semanticSearch: z.boolean().default(false),
-  }).describe('{"query":"standalone information need","sourceIds":["one or more semantic source IDs"],"semanticSearch":false}');
+    semanticResultLimit: z.number().int().min(1).max(agentConfig.retrieval.semanticMaximumResults).optional(),
+  }).describe('{"query":"standalone information need","sourceIds":["one or more source IDs"],"semanticSearch":false,"semanticResultLimit":"optional bounded Pinecone result count"}');
   return {
     name: "retrieve_choir_knowledge",
-    description: `Retrieve current choir evidence from catalogued sources, including when a user calls one a sheet or tab. Catalogue: ${retrievalSourceToolCatalogue()}. Select every materially relevant source. Preserve requested scope: time-bound structured queries must contain a resolved literal date or date range derived from the current turn time, not only a topic. Keep semanticSearch=false for exact structured dates, assignments, names and statuses; enable it only for ambiguous or unstructured needs. Returns evidence and provenance, not a final answer.`,
+    description: `Retrieve current choir evidence from one or more catalogued spreadsheet or indexed sources. Catalogue: ${retrievalSourceToolCatalogue()}. Select every materially relevant source. semantic_knowledge searches broadly across Pinecone; other source IDs constrain retrieval to their source. semanticResultLimit controls a bounded semantic result count. Preserve requested temporal scope. Use read_indexed_source instead of similarity search when every chunk of one indexed document is required. Returns evidence and provenance, not a final answer.`,
     schema,
     sideEffect: "read",
     async execute(input, context) {
@@ -758,6 +809,7 @@ function retrieveKnowledgeTool(knowledge: ChoirKnowledgeService): AgentTool {
       const result = await knowledge.retrieve(query, {
         sourceIds: input.sourceIds,
         semanticSearch: input.semanticSearch,
+        semanticResultLimit: input.semanticResultLimit,
       });
       const evidenceQuality = assessEvidenceQuality(result.context, result.provenance);
       const { sourceHash: _sourceHash, ...plannerResult } = result;
@@ -765,6 +817,46 @@ function retrieveKnowledgeTool(knowledge: ChoirKnowledgeService): AgentTool {
         status: "success",
         summary: `Choir information retrieved; evidence is ${evidenceQuality.status}.`,
         data: { ...plannerResult, evidenceQuality },
+      };
+    },
+  };
+}
+
+function readIndexedSourceTool(knowledge: ChoirKnowledgeService): AgentTool {
+  const maximumPageSize = agentConfig.retrieval.indexedDocumentMaximumPageSize;
+  const schema = z.object({
+    sourceId: z.enum(INDEXED_DOCUMENT_SOURCE_IDS),
+    offset: z.number().int().min(0).default(0),
+    limit: z.number().int().min(1)
+      .max(maximumPageSize)
+      .default(maximumPageSize),
+  }).describe(JSON.stringify({
+    sourceId: `one of: ${INDEXED_DOCUMENT_SOURCE_IDS.join(", ")}`,
+    offset: "zero-based chunk offset; use nextOffset from the previous page",
+    limit: `1-${maximumPageSize}, defaults to ${maximumPageSize}`,
+  }));
+  return {
+    name: "read_indexed_source",
+    description: "Read an indexed document in deterministic chunk order without semantic ranking. Use this for exhaustive requests. Begin with offset=0. If coverage=partial, call again with the exact nextOffset; only claim complete coverage when coverage=complete.",
+    capability: "knowledge",
+    schema,
+    sideEffect: "read",
+    async execute(input) {
+      const result = await knowledge.readIndexedSource!(input);
+      return {
+        status: "success",
+        summary: result.coverage === "complete"
+          ? `Indexed source '${result.sourceId}' was read completely.`
+          : result.coverage === "partial"
+            ? `One page of indexed source '${result.sourceId}' was read; more chunks are available.`
+            : `Indexed source '${result.sourceId}' returned no chunks.`,
+        data: {
+          ...result,
+          evidenceQuality: {
+            status: result.coverage === "none" ? "empty" : "sufficient",
+            reasons: result.coverage === "none" ? ["The indexed source returned no chunks."] : [],
+          },
+        },
       };
     },
   };
@@ -889,7 +981,9 @@ function composeMemberMessageTool(identities: IdentityRepository): AgentTool {
         memberIds.push(matches[0].id);
         const label = matches[0].displayName || matches[0].canonicalName || name;
         mentionLabels.push(label);
-        text = text.replace(new RegExp(escapeRegExp(name), "gi"), `@${label}`);
+        // Accept either a plain model label or an already prefixed label. The
+        // replacement is idempotent, so transport text never becomes @@Name.
+        text = text.replace(memberLabelPattern(name), `@${label}`);
       }
       const transport = context.event.message?.transport ?? String(context.event.payload.transport ?? "unknown");
       const mentions = await identities.getMentionTargets(memberIds, transport);
@@ -903,6 +997,10 @@ function composeMemberMessageTool(identities: IdentityRepository): AgentTool {
       return { status: "success", summary: "Mention-ready message prepared.", reply: { text, mentions, mentionLabels } };
     },
   };
+}
+
+function memberLabelPattern(name: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}_])@?${escapeRegExp(name)}(?![\\p{L}\\p{N}_])`, "giu");
 }
 
 function ensureMentionLabels(text: string, labels: string[]): string {

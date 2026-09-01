@@ -25,8 +25,10 @@ export function createDynamicPromptResolver(registry: PromptRegistry, packIds: s
       "retrieve_choir_knowledge",
       "read_week_schedule",
       "sync_if_stale",
+      "list_knowledge_sources",
       "inspect_spreadsheet",
       "query_spreadsheet",
+      "read_indexed_source",
     ].some((tool) => usedTools.has(tool));
 
     return registry.composeSelected(packIds, (layer) => {

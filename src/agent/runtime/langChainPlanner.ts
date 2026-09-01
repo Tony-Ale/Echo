@@ -386,5 +386,9 @@ function compactToolData(value: unknown, characterLimit: number): unknown {
     ...(record?.evidenceQuality ? { evidenceQuality: record.evidenceQuality } : {}),
     ...(record?.provenance ? { provenance: record.provenance } : {}),
     ...(record?.retrievalProvenance ? { retrievalProvenance: record.retrievalProvenance } : {}),
+    ...(typeof record?.nextOffset === "number" ? { nextOffset: record.nextOffset } : {}),
+    ...(typeof record?.coverage === "string" ? { coverage: record.coverage } : {}),
+    ...(typeof record?.sourceId === "string" ? { sourceId: record.sourceId } : {}),
+    ...(typeof record?.sourceName === "string" ? { sourceName: record.sourceName } : {}),
   };
 }

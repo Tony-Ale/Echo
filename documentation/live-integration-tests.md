@@ -236,6 +236,7 @@ an issue or commit message.
 | Date | Environment | Result | Failed IDs | Notes |
 | --- | --- | --- | --- | --- |
 | YYYY-MM-DD | local staging | Pass/Fail | None or L03, L14 | Short reason or fix reference |
+| 2026-09-01 | local staging | Pass | None | Full regression and live integration run. Fixed spreadsheet recovery, history-source selection, reminder prefix punctuation and idempotent mention labels. L16 nudge suppression passed; early submission could not be exercised because the live rota had no leader for that week. |
 
 ## Cleanup
 

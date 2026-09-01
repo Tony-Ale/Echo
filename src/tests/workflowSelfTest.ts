@@ -190,6 +190,7 @@ async function run(): Promise<void> {
   assert.equal(pastWithTime.failure, "past");
   assert.equal(isExplicitWorkflowActivation("you remind me of my music teacher"), false);
   assert.equal(isExplicitWorkflowActivation("remind me tomorrow about rehearsal"), true);
+  assert.equal(isExplicitWorkflowActivation("Echo, remind me about rehearsal"), true);
   assert.equal(isExplicitWorkflowActivation("set a reminder for tomorrow"), true);
   assert.equal(isExplicitWorkflowActivation("Songs\n#submit_worship"), false);
   assert.equal(isExplicitWorkflowActivation("Songs\n#submit_praise"), false);

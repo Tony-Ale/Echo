@@ -58,10 +58,15 @@ retrieval:
   semanticEvidenceTokens: 750
   fieldTokens: 375
   weeklyEvidenceTokens: 2000
+  spreadsheetMaximumPageSize: 100
+  semanticDefaultResults: 5
+  semanticMaximumResults: 12
+  indexedDocumentMaximumPageSize: 4
 `;
   const configuration = parseAgentConfiguration(source);
   assert.equal(configuration.execution.maxSteps, 10);
   assert.equal(configuration.context.historySearch.maximumLimit, 10);
+  assert.equal(configuration.retrieval.semanticMaximumResults, 12);
 
   assert.throws(() => parseAgentConfiguration(
     source.replace("defaultLimit: 5", "defaultLimit: 11"),
