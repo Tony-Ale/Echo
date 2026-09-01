@@ -55,7 +55,10 @@ export async function retrieveDocuments(
 
     const resolved = resolveRetrievalSources(
         selection.sourceIds,
-        temporalData.map((item) => item.date_equivalent),
+        // Both boundaries matter when a requested window crosses a month.
+        // Using only the start silently omitted the second monthly rota tab.
+        temporalData.flatMap((item) => [item.date_equivalent, item.end_date_equivalent]
+            .filter((date): date is string => Boolean(date))),
     )
     const selectedSemanticNames = [...resolved.sheetNames, ...resolved.indexedSourceNames]
     const semanticInitiallyRequired = selection.semanticSearch

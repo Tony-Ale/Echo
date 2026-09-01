@@ -1,5 +1,5 @@
 // Map of sheet name to the index of the header row for that sheet
-const MONTH_YEAR_PATTERN = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s\d{2}$/i;
+const MONTH_YEAR_PATTERN = /^(jan|feb|mar|apr|may|jun|jul|aug|sept|oct|nov|dec)\s\d{2}$/i;
 
 export function isMonthlyRotaSheet(sheetName: string): boolean {
   return MONTH_YEAR_PATTERN.test(sheetName.trim());

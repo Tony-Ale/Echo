@@ -42,7 +42,7 @@ export function mapDateStringToMonthlyRota(dateString: string): string {
 
     const monthNames = [
         "jan", "feb", "mar", "apr", "may", "jun",
-        "jul", "aug", "sep", "oct", "nov", "dec"
+        "jul", "aug", "sept", "oct", "nov", "dec"
     ];
 
     if (monthIndex < 0 || monthIndex > 11) {

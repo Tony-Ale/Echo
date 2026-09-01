@@ -19,12 +19,14 @@ import {
 } from "../integrations/googleSheets/sheetsRepository.js";
 import { AGENT_CONTEXT_LIMITS } from "../agent/runtime/contextLimits.js";
 import { reorganizeMonthlyRota } from "../integrations/googleSheets/helpers.js";
+import { isMonthlyRotaSheet } from "../integrations/googleSheets/utils.js";
 import { extractSearchTerms, takeDistinctSearchResults } from "../agent/persistence/searchTerms.js";
 import { preserveTemporalQueryScope } from "../domains/choir/intelligence/temporalQuery.js";
 import { VectorRepository } from "../integrations/pinecone/vectorRepository.js";
 
 async function run(): Promise<void> {
   testDeterministicSourceResolution();
+  testSeptemberSourceResolution();
   testIndexedDocumentSourceResolution();
   testRetrievalToolCatalogue();
   testTemporalEvidenceProjection();
@@ -40,6 +42,7 @@ async function run(): Promise<void> {
   await testSheetBatchCache();
   await testSpreadsheetPagination();
   await testMultiSourceStructuredRetrieval();
+  await testCrossMonthRetrievalLoadsBothRotaTabs();
   await testPlannerControlledIndexedSearch();
   await testCompactedEvidenceReportsPartialCoverage();
   await testCompleteIndexedDocumentPage();
@@ -266,6 +269,18 @@ function testDeterministicSourceResolution(): void {
   assert.deepEqual(resolved.unresolvedSources, []);
 }
 
+function testSeptemberSourceResolution(): void {
+  const september = resolveRetrievalSources(["monthly_rota"], ["06/09/2026"]);
+  assert.deepEqual(september.sheetNames, ["sept 26"]);
+  assert.equal(isMonthlyRotaSheet("Sept 26"), true);
+
+  const crossMonth = resolveRetrievalSources(
+    ["monthly_rota", "annual_events"],
+    ["31/08/2026", "06/09/2026"],
+  );
+  assert.deepEqual(crossMonth.sheetNames.sort(), ["2026 events", "aug 26", "sept 26"]);
+}
+
 async function testMultiSourceStructuredRetrieval(): Promise<void> {
   let vectorCalls = 0;
   const result = await retrieveDocuments(
@@ -287,6 +302,30 @@ async function testMultiSourceStructuredRetrieval(): Promise<void> {
   assert.deepEqual(result.provenance.retrievedSources.sort(), ["annual_events", "monthly_rota"]);
   assert.match(result.context, /Wednesday 12\/08\/2026\\nBible study/);
   assert.match(result.context, /Midweek event/);
+}
+
+async function testCrossMonthRetrievalLoadsBothRotaTabs(): Promise<void> {
+  let requestedSheets: string[] = [];
+  const sheets = {
+    async getAllRowsBySheet(options: { sheetNames: string[] }) {
+      requestedSheets = options.sheetNames;
+      return new Map([
+        ["aug 26", [{ WEEK_START: "2026-08-31", CONTENT: "Monday 31/08/2026\n- Monthly activity" }]],
+        ["sept 26", [{ WEEK_START: "2026-08-31", CONTENT: "Sunday 06/09/2026\n- Worship: Member A" }]],
+      ]);
+    },
+  } as unknown as SheetsRepository;
+
+  const result = await retrieveDocuments(
+    "Return the choir schedule from Monday 2026-08-31 through Sunday 2026-09-06, inclusive.",
+    sheets,
+    fakeVectorStore(() => []),
+    { sourceIds: ["monthly_rota"], semanticSearch: false },
+  );
+
+  assert.deepEqual(requestedSheets.sort(), ["aug 26", "sept 26"]);
+  assert.match(result.context, /Sunday 06\/09\/2026/);
+  assert.equal(result.provenance.temporalCoverage, "matched");
 }
 
 async function testPlannerControlledIndexedSearch(): Promise<void> {
